@@ -84,6 +84,7 @@ def set_password():
 
 @dashboard_bp.route('/api/dashboard/reset_save', methods=['POST'])
 def reset_save():
+    import time
     data = request.json
     if not verify_session(data): return jsonify({"error": "Unauthorized"})
     uid = data.get('uid')
@@ -99,13 +100,16 @@ def reset_save():
     conn.execute('''
         UPDATE players 
         SET inventory = ?, DISCORD = '', discord_username = '', discord_avatar = '',
-            FACEBOOK = '', GOOGLE_PLAY = '', custom_name = '', custom_avatar = ''
+            FACEBOOK = '', GOOGLE_PLAY = '', custom_name = '', custom_avatar = '',
+            totalAccumulatedGameplayDuration = 0, Time_played = 0,
+            lastPlayedTime = 2000000000, last_updated = CURRENT_TIMESTAMP
         WHERE uid = ?
     ''', (inventory_str, uid))
     conn.commit()
     conn.close()
     
     return jsonify({"msg": "Save data has been successfully reset."})
+
 
 @dashboard_bp.route('/api/dashboard/unlink_socials', methods=['POST'])
 def unlink_socials():
@@ -158,6 +162,7 @@ def backup_save():
 
 @dashboard_bp.route('/api/dashboard/upload_save', methods=['POST'])
 def upload_save():
+    import time
     data = request.json
     if not verify_session(data): return jsonify({"error": "Unauthorized"})
     uid = data.get('uid')
@@ -165,24 +170,64 @@ def upload_save():
     
     if not isinstance(payload, dict): return jsonify({"error": "Invalid payload"})
     
-    fields_to_update = {}
-    if 'inventory' in payload: fields_to_update['inventory'] = json.dumps(payload['inventory'])
-    if 'PurchasedSales' in payload: fields_to_update['purchasedSales'] = json.dumps(payload['PurchasedSales'])
+    # Map payload fields to DB columns
+    json_fields = {
+        'inventory': ['inventory'],
+        'purchasedSales': ['purchasedSales', 'PurchasedSales', 'purchasedsales'],
+        'unlocks': ['unlocks', 'Unlocks'],
+        'triggers': ['triggers', 'Triggers'],
+        'villainQueue': ['villainQueue', 'VillainQueue'],
+        'pendingTransactions': ['pendingTransactions', 'PendingTransactions'],
+        'socialRewards': ['socialRewards', 'SocialRewards'],
+        'mtxPurchaseTracking': ['mtxPurchaseTracking', 'MtxPurchaseTracking'],
+        'PlatformStoreTransactionIDs': ['PlatformStoreTransactionIDs'],
+        'helpTipsTrackingData': ['helpTipsTrackingData']
+    }
     
-    if not fields_to_update:
-        # Check lowercase keys just in case
-        if 'purchasedsales' in payload: fields_to_update['purchasedSales'] = json.dumps(payload['purchasedsales'])
-        
-    if not fields_to_update:
-        return jsonify({"error": "No meaningful inventory fields found to update."})
-        
+    primitive_fields = {
+        'version': ['version'],
+        'nextId': ['nextId'],
+        'PlayerLevel': ['PlayerLevel', 'playerLevel', 'level'],
+        'xp': ['xp', 'XP'],
+        'totalAccumulatedGameplayDuration': ['totalAccumulatedGameplayDuration', 'total_gameplay_duration', 'Time_played'],
+        'completedOrders': ['completedOrders'],
+        'completedQuestsTotal': ['completedQuestsTotal'],
+        'highestFtueLevel': ['highestFtueLevel'],
+        'targetExpansionID': ['targetExpansionID']
+    }
+    
+    fields_to_update = {}
+    for db_col, keys in json_fields.items():
+        for k in keys:
+            if k in payload:
+                val = payload[k]
+                fields_to_update[db_col] = json.dumps(val) if not isinstance(val, str) else val
+                break
+
+    for db_col, keys in primitive_fields.items():
+        for k in keys:
+            if k in payload:
+                fields_to_update[db_col] = payload[k]
+                break
+
+    if 'totalAccumulatedGameplayDuration' in fields_to_update:
+        fields_to_update['Time_played'] = fields_to_update['totalAccumulatedGameplayDuration']
+
+    # Always ensure lastPlayedTime is set to a future timestamp (2000000000) so server save overrides local device save
+    fields_to_update['lastPlayedTime'] = 2000000000
+
     conn = get_db_connection()
-    for k, v in fields_to_update.items():
-        conn.execute(f"UPDATE players SET {k} = ? WHERE uid = ?", (v, uid))
+    set_clauses = [f"{k} = ?" for k in fields_to_update.keys()]
+    set_clauses.append("last_updated = CURRENT_TIMESTAMP")
+    values = list(fields_to_update.values()) + [uid]
+    
+    query = f"UPDATE players SET {', '.join(set_clauses)} WHERE uid = ?"
+    conn.execute(query, values)
     conn.commit()
     conn.close()
     
-    return jsonify({"msg": "Save uploaded and applied!"})
+    return jsonify({"msg": "Save uploaded successfully! Timestamp updated to override local save."})
+
 
 @dashboard_bp.route('/api/dashboard/migrate_save', methods=['POST'])
 def migrate_save():
@@ -487,3 +532,77 @@ def admin_regenerate_social_events():
         return jsonify({"msg": "Social events successfully regenerated!"})
     except Exception as e:
         return jsonify({"error": f"Failed to regenerate: {e}"}), 500
+
+def is_limited_buildings_unlocked():
+    if not os.path.exists(DEFINITIONS_PATH):
+        return False
+    try:
+        with open(DEFINITIONS_PATH, 'r') as f:
+            d = json.load(f)
+        for item in d.get('storeItemDefinitions', []):
+            if item.get('id') in [1000012400, 1000012363]:
+                if not item.get('OnlyShowIfOwned') and item.get('specialEventID', 0) == 0:
+                    return True
+    except Exception as e:
+        print(f"[LIMITED] Error checking status: {e}")
+    return False
+
+@dashboard_bp.route('/api/dashboard/limited_buildings_status', methods=['GET'])
+@dashboard_bp.route('/api/admin/limited_buildings_status', methods=['GET'])
+def get_limited_buildings_status():
+    return jsonify({
+        "unlocked": is_limited_buildings_unlocked()
+    })
+
+@dashboard_bp.route('/api/dashboard/toggle_limited_buildings', methods=['POST'])
+@dashboard_bp.route('/api/admin/toggle_limited_buildings', methods=['POST'])
+def toggle_limited_buildings():
+    from routes.sales import clear_cached_defs
+    if not os.path.exists(DEFINITIONS_PATH):
+        return jsonify({"error": "definitions.json not found"}), 404
+        
+    try:
+        with open(DEFINITIONS_PATH, 'r') as f:
+            d = json.load(f)
+            
+        current_unlocked = is_limited_buildings_unlocked()
+        target_unlocked = not current_unlocked
+        
+        target_ref_ids = set(range(4101, 4106)) | set(range(4201, 4217)) | {
+            3113, 1000009345, 1000010729, 1000010970, 1000011021, 1000011117,
+            1000011349, 1000011652, 1000011700, 1000011706, 1000012546,
+            1000012942, 1000012966, 1000012972, 1000012978, 1000012984
+        }
+        
+        count = 0
+        for item in d.get('storeItemDefinitions', []):
+            ref_id = item.get('ReferencedDefID')
+            if ref_id in target_ref_ids or item.get('specialEventID', 0) > 0 or item.get('OnlyShowIfOwned'):
+                if target_unlocked:
+                    item['OnlyShowIfOwned'] = False
+                    item['specialEventID'] = 0
+                    item['disabled'] = False
+                else:
+                    if ref_id in range(4201, 4217) or ref_id in range(4101, 4106):
+                        item['specialEventID'] = 110000
+                        item['OnlyShowIfOwned'] = True
+                    else:
+                        item['OnlyShowIfOwned'] = True
+                count += 1
+                
+        with open(DEFINITIONS_PATH, 'w') as f:
+            json.dump(d, f, indent=2)
+            
+        clear_cached_defs()
+        
+        status_msg = "Limited buildings unlocked! They are now visible in the shop." if target_unlocked else "Limited buildings visibility restored to default."
+        return jsonify({
+            "status": "success",
+            "unlocked": target_unlocked,
+            "modified_count": count,
+            "msg": status_msg
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to toggle: {e}"}), 500
+
+

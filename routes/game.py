@@ -121,7 +121,7 @@ def get_gamestate(user_id):
         profile = get_player_data(user_id)
     
     if profile:
-        json_str = json.dumps(profile, ensure_ascii=False)
+        json_str = json.dumps(profile, ensure_ascii=False, separators=(',', ':'))
         return current_app.response_class(
             response=json_str,
             status=200,

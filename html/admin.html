@@ -468,7 +468,7 @@
 
                     <!-- Global Config -->
                     <div class="card">
-                        <h3>Global Options</h3>
+                        <h3>Global Options & Unlock Controls</h3>
                         <div class="form-grid" style="margin-top: 15px;">
                             <div class="form-control">
                                 <label>Default Min Level</label>
@@ -482,6 +482,10 @@
                                 <label>Global End UTC Time</label>
                                 <input type="number" id="shop-global-end-utc">
                             </div>
+                        </div>
+                        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                            <label style="font-weight: 600; display: block; margin-bottom: 8px;">Limited Buildings Visibility (Winter/WNTR & Event Items)</label>
+                            <button id="admin-btn-toggle-limited" class="btn btn-secondary" onclick="toggleLimitedBuildingsAdmin()">Check Status...</button>
                         </div>
                     </div>
 
@@ -679,6 +683,7 @@
                 });
 
                 renderActivePacks();
+                checkLimitedBuildingsAdmin();
             });
         }
 
@@ -832,6 +837,37 @@
                 loadEvents();
             })
             .catch(err => alert("Error: " + err.message));
+        }
+
+        function checkLimitedBuildingsAdmin() {
+            fetch(`/api/admin/limited_buildings_status?token=${adminToken}`, { headers: getHeaders() })
+            .then(res => res.json())
+            .then(res => {
+                const btn = document.getElementById("admin-btn-toggle-limited");
+                if (btn) {
+                    if (res.unlocked) {
+                        btn.innerText = "Lock Limited Buildings (Default)";
+                        btn.style.background = "#ef4444";
+                    } else {
+                        btn.innerText = "Unlock All Limited Buildings in Shop";
+                        btn.style.background = "#6366f1";
+                    }
+                }
+            })
+            .catch(e => console.error("Error checking limited buildings status:", e));
+        }
+
+        function toggleLimitedBuildingsAdmin() {
+            fetch(`/api/admin/toggle_limited_buildings?token=${adminToken}`, { method: "POST", headers: getHeaders() })
+            .then(res => res.json())
+            .then(res => {
+                if (res.error) alert(res.error);
+                else {
+                    alert(res.msg);
+                    checkLimitedBuildingsAdmin();
+                }
+            })
+            .catch(e => alert("Failed to toggle limited buildings: " + e.message));
         }
     </script>
 </body>

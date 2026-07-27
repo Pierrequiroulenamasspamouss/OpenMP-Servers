@@ -482,15 +482,20 @@ def update_player_in_db(user_id, player_data):
 
     # 2. High Playtime Guard: If existing record has more playtime, don't overwrite critical fields
     incoming_playtime = player_data.get('totalAccumulatedGameplayDuration', 0)
-    existing_playtime = row['totalAccumulatedGameplayDuration'] if row else 0
+    existing_playtime = row['totalAccumulatedGameplayDuration'] if row and row.get('totalAccumulatedGameplayDuration') else 0
+    existing_last_played = row['lastPlayedTime'] if row and row.get('lastPlayedTime') else 0
+    incoming_last_played = player_data.get('lastPlayedTime', 0)
+    final_last_played = max(incoming_last_played, existing_last_played)
     
     # 5s margin for safety (client might have slightly different drift)
-    is_stale_update = row and incoming_playtime < (existing_playtime - 5) 
+    # If lastPlayedTime >= 2000000000, it's a manual dashboard upload override so don't block update
+    is_manual_override = existing_last_played >= 2000000000
+    is_stale_update = not is_manual_override and row and incoming_playtime < (existing_playtime - 5) 
     if is_stale_update:
         print(f"[DB] PROTECTING {record_uid}: Incoming playtime {incoming_playtime} is less than existing {existing_playtime}. Skipping progress update.")
         # We only update last_updated and lastPlayedTime to keep the session alive
         conn.execute("UPDATE players SET last_updated = CURRENT_TIMESTAMP, lastPlayedTime = ? WHERE uid = ?", 
-                     (player_data.get('lastPlayedTime', 0), record_uid))
+                     (final_last_played, record_uid))
         conn.commit()
         conn.close()
         return
@@ -510,7 +515,7 @@ def update_player_in_db(user_id, player_data):
         'lastLevelUpTime': player_data.get('lastLevelUpTime', 0),
         'lastGameStartTime': player_data.get('lastGameStartTime', 0),
         'firstGameStartTime': player_data.get('firstGameStartTime', 0),
-        'lastPlayedTime': player_data.get('lastPlayedTime', 0),
+        'lastPlayedTime': final_last_played,
         'totalGameplayDurationSinceLastLevelUp': player_data.get('totalGameplayDurationSinceLastLevelUp', 0),
         'totalAccumulatedGameplayDuration': player_data.get('totalAccumulatedGameplayDuration', 0),
         'targetExpansionID': player_data.get('targetExpansionID', 0),

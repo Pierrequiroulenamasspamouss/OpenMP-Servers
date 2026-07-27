@@ -49,20 +49,26 @@ def run_server(port):
     app.run(host=Config.HOST, port=port, debug=Config.DEBUG, threaded=True)
 
 if __name__ == '__main__':
-    # Using a single run for the main port with debug=True for auto-reload
-    # and a separate thread for the other port. 
-    # Flask's reloader only works well in the main thread.
-    
+    from werkzeug.serving import make_server
+    import os
+
+    # Secondary server thread on PORT_SECONDARY (44732)
     def run_secondary():
-        # Secondary port
         app_sec = create_app(Config.PORT_SECONDARY)
+        srv = make_server(Config.HOST, Config.PORT_SECONDARY, app_sec, threaded=True)
         print(f">>> Secondary Server started on port {Config.PORT_SECONDARY}", flush=True)
-        app_sec.run(host=Config.HOST, port=Config.PORT_SECONDARY, debug=Config.DEBUG, threaded=True, use_reloader=False)
+        srv.serve_forever()
 
-    t2 = threading.Thread(target=run_secondary, daemon=True)
-    t2.start()
+    # Avoid running background threads in Werkzeug reloader parent process
+    is_reloader_parent = Config.DEBUG and os.environ.get('WERKZEUG_RUN_MAIN') != 'true'
 
-    # Main port
+    if not is_reloader_parent:
+        t2 = threading.Thread(target=run_secondary, daemon=True)
+        t2.start()
+        print(f">>> Main Server started on port {Config.PORT_MAIN}", flush=True)
+
+    # Main server on PORT_MAIN (44733)
     app_main = create_app(Config.PORT_MAIN)
-    print(f">>> Main Server started on port {Config.PORT_MAIN}", flush=True)
-    app_main.run(host=Config.HOST, port=Config.PORT_MAIN, debug=Config.DEBUG, threaded=True, use_reloader=False)
+    app_main.run(host=Config.HOST, port=Config.PORT_MAIN, debug=Config.DEBUG, threaded=True, use_reloader=Config.DEBUG)
+
+

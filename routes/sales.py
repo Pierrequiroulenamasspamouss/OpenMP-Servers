@@ -13,6 +13,11 @@ SCHEDULE_PATH = Config.SCHEDULE_PATH
 _cached_definitions = None
 _cached_defs_indexed = None
 
+def clear_cached_defs():
+    global _cached_definitions, _cached_defs_indexed
+    _cached_definitions = None
+    _cached_defs_indexed = None
+
 def get_defs():
     global _cached_definitions, _cached_defs_indexed
     if _cached_definitions is None:

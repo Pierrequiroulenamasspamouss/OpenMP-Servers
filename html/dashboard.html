@@ -235,6 +235,13 @@
                 <p style="font-size: 0.875rem;">Checkout your resources and currencies.</p>
                 <button class="secondary" onclick="viewInventory()">Show Inventory</button>
             </div>
+
+            <!-- Limited Buildings Shop Unlock -->
+            <div class="action-card">
+                <h3>Shop Buildings Visibility</h3>
+                <p style="font-size: 0.875rem;">Unlock limited-time & event buildings (Winter/WNTR, etc.) in the main shop.</p>
+                <button id="btn-toggle-limited" class="secondary" style="margin-top: 0.5rem;" onclick="toggleLimitedBuildings()">Check Status...</button>
+            </div>
         </div>
     </div>
 </div>
@@ -505,6 +512,37 @@
             document.getElementById('add-item-amount').value = '';
         });
     }
+
+    function checkLimitedBuildings() {
+        fetch('/api/dashboard/limited_buildings_status')
+        .then(r => r.json())
+        .then(res => {
+            const btn = document.getElementById('btn-toggle-limited');
+            if (btn) {
+                if (res.unlocked) {
+                    btn.innerText = "Lock Limited Buildings (Default)";
+                    btn.className = "danger";
+                } else {
+                    btn.innerText = "Unlock All Limited Buildings in Shop";
+                    btn.className = "secondary";
+                }
+            }
+        });
+    }
+
+    function toggleLimitedBuildings() {
+        fetch('/api/dashboard/toggle_limited_buildings', { method: 'POST' })
+        .then(r => r.json())
+        .then(res => {
+            if (res.error) return showMsg(res.error, "error");
+            showMsg(res.msg, "success");
+            checkLimitedBuildings();
+        })
+        .catch(e => showMsg("Failed to toggle limited buildings", "error"));
+    }
+
+    // Check status on load
+    document.addEventListener('DOMContentLoaded', checkLimitedBuildings);
 </script>
 </body>
 </html>
