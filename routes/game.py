@@ -227,6 +227,21 @@ def save_gamestate(user_id):
         print(f"[GAME] SAVING PROFILE for user {user_id} to database")
         try:
             event_flags = get_player_event_flags(user_id)
+            all_target_unlock_ids = set(range(4101, 4106)) | set(range(4201, 4217)) | {
+                3113, 1000009345, 1000010729, 1000010970, 1000011021, 1000011117,
+                1000011349, 1000011652, 1000011700, 1000011706, 1000012546,
+                1000012942, 1000012966, 1000012972, 1000012978, 1000012984,
+                1000021206, 1000021207, 1000021208, 1000021209, 1000021210,
+                1000021211, 1000021212, 1000021213, 1000021214, 1000021215,
+                1000021216, 1000021217, 1000021218, 1000021219, 1000021220, 1000021221
+            }
+            if not event_flags.get("limited_buildings_unlocked"):
+                unlocks_list = player_data.get("unlocks") or []
+                if isinstance(unlocks_list, list):
+                    player_data["unlocks"] = [
+                        u for u in unlocks_list
+                        if isinstance(u, dict) and u.get("defID") not in all_target_unlock_ids and u.get("ReferencedDefinitionID") not in all_target_unlock_ids and u.get("ID") not in all_target_unlock_ids
+                    ]
             # Patch SpecialEventItem 110000 in INVENTORY (not instances — PlayerData only reads inventory)
             inventory = player_data.get("inventory") or []
             if isinstance(inventory, list):

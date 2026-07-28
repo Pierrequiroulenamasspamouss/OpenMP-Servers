@@ -212,10 +212,15 @@ def get_player_event_flags(uid):
     conn.close()
     if not row:
         return {"christmas_event_active": 0, "limited_buildings_unlocked": 0, "holiday_offer_active": 0}
+    c_active = row["christmas_event_active"] if row["christmas_event_active"] is not None else 0
+    h_active = row["holiday_offer_active"] if row["holiday_offer_active"] is not None else 0
+    l_active = row["limited_buildings_unlocked"] if row["limited_buildings_unlocked"] is not None else 0
+    if c_active or h_active:
+        l_active = 1
     return {
-        "christmas_event_active": row["christmas_event_active"] if row["christmas_event_active"] is not None else 0,
-        "limited_buildings_unlocked": row["limited_buildings_unlocked"] if row["limited_buildings_unlocked"] is not None else 0,
-        "holiday_offer_active": row["holiday_offer_active"] if row["holiday_offer_active"] is not None else 0
+        "christmas_event_active": c_active,
+        "limited_buildings_unlocked": l_active,
+        "holiday_offer_active": h_active
     }
 
 def set_player_event_flag(uid, flag_name, value):
@@ -233,6 +238,8 @@ def set_player_event_flag(uid, flag_name, value):
         conn.execute(f"INSERT INTO players (uid, {flag_name}, lastPlayedTime) VALUES (?, ?, ?)", (master_uid, val_int, current_ts))
     else:
         conn.execute(f"UPDATE players SET {flag_name} = ?, lastPlayedTime = ?, last_updated = CURRENT_TIMESTAMP WHERE uid = ?", (val_int, current_ts, master_uid))
+        if flag_name in ("christmas_event_active", "holiday_offer_active") and val_int == 1:
+            conn.execute("UPDATE players SET limited_buildings_unlocked = 1, lastPlayedTime = ?, last_updated = CURRENT_TIMESTAMP WHERE uid = ?", (current_ts, master_uid))
     conn.commit()
     conn.close()
     return True
