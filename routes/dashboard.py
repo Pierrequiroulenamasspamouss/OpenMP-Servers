@@ -558,6 +558,7 @@ def get_limited_buildings_status():
 @dashboard_bp.route('/api/admin/toggle_limited_buildings', methods=['POST'])
 def toggle_limited_buildings():
     from routes.sales import clear_cached_defs
+    from utils.db import get_db_connection
     if not os.path.exists(DEFINITIONS_PATH):
         return jsonify({"error": "definitions.json not found"}), 404
         
@@ -573,6 +574,12 @@ def toggle_limited_buildings():
             1000011349, 1000011652, 1000011700, 1000011706, 1000012546,
             1000012942, 1000012966, 1000012972, 1000012978, 1000012984
         }
+
+        # Map UNLOCK item IDs
+        unlock_item_ids = {
+            item['id'] for item in d.get('itemDefinitions', [])
+            if item.get('type') == 'UNLOCK' and item.get('referencedDefinitionID') in target_ref_ids
+        }
         
         count = 0
         for item in d.get('storeItemDefinitions', []):
@@ -582,20 +589,53 @@ def toggle_limited_buildings():
                     item['OnlyShowIfOwned'] = False
                     item['specialEventID'] = 0
                     item['disabled'] = False
+                    if ref_id in range(4101, 4106):
+                        item['type'] = 'Leisure'
+                    elif ref_id in range(4201, 4217):
+                        item['type'] = 'Decoration'
                 else:
                     if ref_id in range(4201, 4217) or ref_id in range(4101, 4106):
                         item['specialEventID'] = 110000
                         item['OnlyShowIfOwned'] = True
+                        item['type'] = 'SpecialEvent'
                     else:
                         item['OnlyShowIfOwned'] = True
                 count += 1
+
+        # Also update level-up transaction outputs in definitions.json
+        for t in d.get('transactions', []):
+            for out in t.get('outputs', []):
+                if out.get('id') in unlock_item_ids:
+                    out['quantity'] = 1 if target_unlocked else 0
                 
         with open(DEFINITIONS_PATH, 'w') as f:
             json.dump(d, f, indent=2)
             
         clear_cached_defs()
+
+        # Update SQLite DB player saves to ensure existing player saves have unlock quantities
+        conn = get_db_connection()
+        rows = conn.execute("SELECT uid, unlocks FROM players").fetchall()
+        for row in rows:
+            uid = row['uid']
+            unlocks_data = json.loads(row['unlocks'] or '[]')
+            existing_unlocked_ids = {u.get('ReferencedDefinitionID') for u in unlocks_data if isinstance(u, dict)}
+            
+            if target_unlocked:
+                for u_id in unlock_item_ids:
+                    if u_id not in existing_unlocked_ids:
+                        unlocks_data.append({"ReferencedDefinitionID": u_id, "Quantity": 1})
+            else:
+                unlocks_data = [u for u in unlocks_data if isinstance(u, dict) and u.get('ReferencedDefinitionID') not in unlock_item_ids]
+
+            conn.execute(
+                "UPDATE players SET unlocks = ?, lastPlayedTime = 2000000000, last_updated = CURRENT_TIMESTAMP WHERE uid = ?",
+                (json.dumps(unlocks_data), uid)
+            )
+        conn.commit()
+        conn.close()
         
-        status_msg = "Limited buildings unlocked! They are now visible in the shop." if target_unlocked else "Limited buildings visibility restored to default."
+        status_msg = "Limited buildings unlocked! They are now visible and unlocked in the shop for all players." if target_unlocked else "Limited buildings visibility restored to default."
         return jsonify({
             "status": "success",
             "unlocked": target_unlocked,
