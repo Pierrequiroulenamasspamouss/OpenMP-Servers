@@ -226,10 +226,13 @@ def set_player_event_flag(uid, flag_name, value):
     val_int = 1 if value else 0
     conn = get_db_connection()
     row = conn.execute("SELECT uid FROM players WHERE uid = ?", (master_uid,)).fetchone()
+    import time
+    current_ts = int(time.time())
+    
     if not row:
-        conn.execute(f"INSERT INTO players (uid, {flag_name}, lastPlayedTime) VALUES (?, ?, 2000000000)", (master_uid, val_int))
+        conn.execute(f"INSERT INTO players (uid, {flag_name}, lastPlayedTime) VALUES (?, ?, ?)", (master_uid, val_int, current_ts))
     else:
-        conn.execute(f"UPDATE players SET {flag_name} = ?, lastPlayedTime = 2000000000, last_updated = CURRENT_TIMESTAMP WHERE uid = ?", (val_int, master_uid))
+        conn.execute(f"UPDATE players SET {flag_name} = ?, lastPlayedTime = ?, last_updated = CURRENT_TIMESTAMP WHERE uid = ?", (val_int, current_ts, master_uid))
     conn.commit()
     conn.close()
     return True

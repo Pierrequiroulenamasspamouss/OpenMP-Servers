@@ -64715,5 +64715,15 @@
   "xpDropDownDefinition": {
     "autoHideInSeconds": 2,
     "id": 307
-  }
+  },
+  "specialEventItemDefinitions": [
+    {
+      "id": 110000,
+      "isActive": true,
+      "localizedKey": "Event_Winter_2015",
+      "paintoverPrefab": "WNTR_15_EnvLights_Prefab",
+      "startDate": "2015-12-01T00:00:00Z",
+      "endDate": "2099-12-31T23:59:59Z"
+    }
+  ]
 }

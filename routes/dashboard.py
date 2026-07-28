@@ -540,10 +540,57 @@ def player_events_status():
     if token != gen_token(uid): return jsonify({"error": "Unauthorized"}), 401
     from utils.db import get_player_event_flags
     flags = get_player_event_flags(uid)
-    return jsonify({
+    res = jsonify({
         "christmas_event_active": bool(flags.get("christmas_event_active")),
         "limited_buildings_unlocked": bool(flags.get("limited_buildings_unlocked")),
         "holiday_offer_active": bool(flags.get("holiday_offer_active"))
+    })
+    res.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return res
+
+@dashboard_bp.route('/api/dashboard/set_christmas_event', methods=['POST'])
+def set_christmas_event():
+    data = request.json or {}
+    if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
+    uid = data.get('uid')
+    enabled = 1 if data.get('enabled') or data.get('active') else 0
+    from utils.db import set_player_event_flag
+    set_player_event_flag(uid, "christmas_event_active", enabled)
+    status_str = "enabled" if enabled else "disabled"
+    return jsonify({
+        "status": "success",
+        "christmas_event_active": bool(enabled),
+        "msg": f"Christmas Event is now {status_str} for user {uid}!"
+    })
+
+@dashboard_bp.route('/api/dashboard/set_limited_buildings', methods=['POST'])
+def set_limited_buildings():
+    data = request.json or {}
+    if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
+    uid = data.get('uid')
+    enabled = 1 if data.get('enabled') or data.get('active') else 0
+    from utils.db import set_player_event_flag
+    set_player_event_flag(uid, "limited_buildings_unlocked", enabled)
+    status_str = "unlocked" if enabled else "relocked"
+    return jsonify({
+        "status": "success",
+        "limited_buildings_unlocked": bool(enabled),
+        "msg": f"Special Event Buildings are now {status_str} for user {uid}!"
+    })
+
+@dashboard_bp.route('/api/dashboard/set_holiday_offer', methods=['POST'])
+def set_holiday_offer():
+    data = request.json or {}
+    if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
+    uid = data.get('uid')
+    enabled = 1 if data.get('enabled') or data.get('active') else 0
+    from utils.db import set_player_event_flag
+    set_player_event_flag(uid, "holiday_offer_active", enabled)
+    status_str = "active" if enabled else "hidden"
+    return jsonify({
+        "status": "success",
+        "holiday_offer_active": bool(enabled),
+        "msg": f"Holiday Offer is now {status_str} for user {uid}!"
     })
 
 @dashboard_bp.route('/api/dashboard/toggle_christmas_event', methods=['POST'])
@@ -551,48 +598,34 @@ def toggle_christmas_event():
     data = request.json or {}
     if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
     uid = data.get('uid')
-    from utils.db import get_player_event_flags, set_player_event_flag
+    from utils.db import get_player_event_flags
     flags = get_player_event_flags(uid)
     new_val = 0 if flags.get("christmas_event_active") else 1
-    set_player_event_flag(uid, "christmas_event_active", new_val)
-    status_str = "enabled" if new_val else "disabled"
-    return jsonify({
-        "status": "success",
-        "christmas_event_active": bool(new_val),
-        "msg": f"Christmas Event is now {status_str} for your player profile!"
-    })
+    data['enabled'] = new_val
+    return set_christmas_event()
 
 @dashboard_bp.route('/api/dashboard/toggle_limited_buildings', methods=['POST'])
 def toggle_limited_buildings():
     data = request.json or {}
     if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
     uid = data.get('uid')
-    from utils.db import get_player_event_flags, set_player_event_flag
+    from utils.db import get_player_event_flags
     flags = get_player_event_flags(uid)
     new_val = 0 if flags.get("limited_buildings_unlocked") else 1
-    set_player_event_flag(uid, "limited_buildings_unlocked", new_val)
-    status_str = "unlocked" if new_val else "relocked"
-    return jsonify({
-        "status": "success",
-        "limited_buildings_unlocked": bool(new_val),
-        "msg": f"Special Event Buildings are now {status_str} for your player profile!"
-    })
+    data['enabled'] = new_val
+    return set_limited_buildings()
 
 @dashboard_bp.route('/api/dashboard/toggle_holiday_offer', methods=['POST'])
 def toggle_holiday_offer():
     data = request.json or {}
     if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
     uid = data.get('uid')
-    from utils.db import get_player_event_flags, set_player_event_flag
+    from utils.db import get_player_event_flags
     flags = get_player_event_flags(uid)
     new_val = 0 if flags.get("holiday_offer_active") else 1
-    set_player_event_flag(uid, "holiday_offer_active", new_val)
-    status_str = "active" if new_val else "hidden"
-    return jsonify({
-        "status": "success",
-        "holiday_offer_active": bool(new_val),
-        "msg": f"Holiday Offer (Christmas Minion) is now {status_str} in your marketplace!"
-    })
+    data['enabled'] = new_val
+    return set_holiday_offer()
+
 
 
 

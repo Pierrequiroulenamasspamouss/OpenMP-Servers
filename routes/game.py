@@ -118,51 +118,46 @@ def get_gamestate(user_id):
         from utils.db import update_player_in_db
         new_profile = generate_new_player_profile(user_id)
         update_player_in_db(user_id, new_profile)
-        profile = get_player_data(user_id)
-    
     if profile:
         from utils.db import get_player_event_flags
         event_flags = get_player_event_flags(user_id)
 
-        # 1. Process Christmas Event (SpecialEventItem 110000) per-player
-        instances = profile.get("instances", profile.get("items", []))
-        if isinstance(instances, str):
-            try: instances = json.loads(instances)
-            except: instances = []
-        if not isinstance(instances, list):
-            instances = []
+        # Process Christmas Event: patch SpecialEventItem 110000 into INVENTORY
+        # (PlayerData.DeserializeProperty only handles "INVENTORY", not "INSTANCES")
+        inventory = profile.get("inventory", [])
+        if isinstance(inventory, str):
+            try: inventory = json.loads(inventory)
+            except: inventory = []
+        if not isinstance(inventory, list):
+            inventory = []
 
-        c_event = None
-        for inst in instances:
-            if isinstance(inst, dict) and inst.get("Definition") == 110000:
-                c_event = inst
-                break
+        # Remove any existing 110000 entry (with or without HasEnded) to avoid duplicates
+        inventory = [i for i in inventory if not (isinstance(i, dict) and i.get("Definition") == 110000)]
 
         if event_flags.get("christmas_event_active"):
-            if c_event:
-                c_event["HasEnded"] = False
-            else:
-                instances.append({
-                    "$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp",
-                    "Definition": 110000,
-                    "ID": 99001100,
-                    "HasEnded": False
-                })
+            inventory.append({
+                "$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp",
+                "Definition": 110000,
+                "ID": 99001100,
+                "HasEnded": False
+            })
         else:
-            if c_event:
-                c_event["HasEnded"] = True
-            else:
-                instances.append({
-                    "$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp",
-                    "Definition": 110000,
-                    "ID": 99001100,
-                    "HasEnded": True
-                })
+            inventory.append({
+                "$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp",
+                "Definition": 110000,
+                "ID": 99001100,
+                "HasEnded": True
+            })
 
-        if "instances" in profile or "items" not in profile:
-            profile["instances"] = instances
-        if "items" in profile:
-            profile["items"] = instances
+        profile["inventory"] = inventory
+
+        # Also clear any instances list that may confuse the client (keep it as-is for other data)
+        # Remove 110000 from instances if present (redundant and skipped by deserializer anyway)
+        raw_instances = profile.get("instances", profile.get("items", []))
+        if isinstance(raw_instances, list):
+            raw_instances = [i for i in raw_instances if not (isinstance(i, dict) and i.get("Definition") == 110000)]
+            if "instances" in profile: profile["instances"] = raw_instances
+            if "items" in profile: profile["items"] = raw_instances
 
         # 2. Process Limited Buildings Unlocks per-player
         all_target_unlock_ids = set(range(4101, 4106)) | set(range(4201, 4217)) | {
@@ -207,6 +202,12 @@ def get_gamestate(user_id):
         profile["unlocks"] = unlocks_list
 
         json_str = json.dumps(profile, ensure_ascii=False, separators=(',', ':'))
+        # DEBUG: find HasEnded snippet in outgoing JSON
+        ev_idx = json_str.find('"Definition":110000')
+        if ev_idx >= 0:
+            snippet_start = max(0, ev_idx - 50)
+            snippet = json_str[snippet_start:ev_idx + 80]
+            print(f"[GAME] SERVER SAVE: lastPlayedTime = {profile.get('lastPlayedTime')} | Event 110000 snippet: {snippet}", flush=True)
         return current_app.response_class(
             response=json_str,
             status=200,
@@ -226,19 +227,15 @@ def save_gamestate(user_id):
         print(f"[GAME] SAVING PROFILE for user {user_id} to database")
         try:
             event_flags = get_player_event_flags(user_id)
-            instances = player_data.get("instances") or player_data.get("items") or []
-            if isinstance(instances, list):
-                c_event = None
-                for inst in instances:
-                    if isinstance(inst, dict) and inst.get("Definition") == 110000:
-                        c_event = inst
-                        break
+            # Patch SpecialEventItem 110000 in INVENTORY (not instances — PlayerData only reads inventory)
+            inventory = player_data.get("inventory") or []
+            if isinstance(inventory, list):
+                inventory = [i for i in inventory if not (isinstance(i, dict) and i.get("Definition") == 110000)]
                 if event_flags.get("christmas_event_active"):
-                    if c_event: c_event["HasEnded"] = False
-                    else: instances.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": False})
+                    inventory.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": False})
                 else:
-                    if c_event: c_event["HasEnded"] = True
-                    else: instances.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": True})
+                    inventory.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": True})
+                player_data["inventory"] = inventory
             update_player_in_db(user_id, player_data)
         except Exception as e:
             print(f"[GAME] ERROR UPDATING DATABASE: {e}")
