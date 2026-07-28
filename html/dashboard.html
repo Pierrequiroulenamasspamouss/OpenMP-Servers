@@ -236,11 +236,24 @@
                 <button class="secondary" onclick="viewInventory()">Show Inventory</button>
             </div>
 
-            <!-- Limited Buildings Shop Unlock -->
-            <div class="action-card">
-                <h3>Shop Buildings Visibility</h3>
-                <p style="font-size: 0.875rem;">Unlock limited-time & event buildings (Winter/WNTR, etc.) in the main shop.</p>
-                <button id="btn-toggle-limited" class="secondary" style="margin-top: 0.5rem;" onclick="toggleLimitedBuildings()">Check Status...</button>
+            <!-- Special Events & Offers Management (Per-Player) -->
+            <div class="action-card" style="grid-column: span 2;">
+                <h3><i class="fa-solid fa-snowflake" style="color: #0EA5E9; margin-right: 8px;"></i>Special Events & Offers (Per-Player)</h3>
+                <p style="font-size: 0.875rem; margin-bottom: 1rem;">Toggle events, building shop availability, and marketplace offers individually for your player account.</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.3rem;">Christmas / Winter Event</label>
+                        <button id="btn-toggle-christmas" class="secondary" onclick="toggleChristmasEvent()">Checking...</button>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.3rem;">Special Event Buildings</label>
+                        <button id="btn-toggle-buildings" class="secondary" onclick="toggleLimitedBuildings()">Checking...</button>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.3rem;">Christmas Minion Offer</label>
+                        <button id="btn-toggle-offer" class="secondary" onclick="toggleHolidayOffer()">Checking...</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -381,6 +394,7 @@
             document.getElementById('display-name').innerText = res.name || 'Player';
             
             document.getElementById('security-warning').style.display = res.secured ? 'none' : 'block';
+            fetchPlayerEventStatus();
         });
     }
 
@@ -513,36 +527,69 @@
         });
     }
 
-    function checkLimitedBuildings() {
-        fetch('/api/dashboard/limited_buildings_status')
+    function fetchPlayerEventStatus() {
+        if(!currentSession) return;
+        fetch(`/api/dashboard/player_events_status?uid=${currentSession.uid}&token=${currentSession.token}`)
         .then(r => r.json())
         .then(res => {
-            const btn = document.getElementById('btn-toggle-limited');
-            if (btn) {
-                if (res.unlocked) {
-                    btn.innerText = "Lock Limited Buildings (Default)";
-                    btn.className = "danger";
+            if (res.error) return;
+            const btnChristmas = document.getElementById('btn-toggle-christmas');
+            const btnBuildings = document.getElementById('btn-toggle-buildings');
+            const btnOffer = document.getElementById('btn-toggle-offer');
+
+            if (btnChristmas) {
+                if (res.christmas_event_active) {
+                    btnChristmas.innerText = "Disable Christmas Event";
+                    btnChristmas.className = "danger";
                 } else {
-                    btn.innerText = "Unlock All Limited Buildings in Shop";
-                    btn.className = "secondary";
+                    btnChristmas.innerText = "Enable Christmas Event";
+                    btnChristmas.className = "secondary";
+                }
+            }
+
+            if (btnBuildings) {
+                if (res.limited_buildings_unlocked) {
+                    btnBuildings.innerText = "Relock Event Buildings";
+                    btnBuildings.className = "danger";
+                } else {
+                    btnBuildings.innerText = "Unlock Event Buildings";
+                    btnBuildings.className = "secondary";
+                }
+            }
+
+            if (btnOffer) {
+                if (res.holiday_offer_active) {
+                    btnOffer.innerText = "Hide Christmas Minion Offer";
+                    btnOffer.className = "danger";
+                } else {
+                    btnOffer.innerText = "Trigger Christmas Minion Offer";
+                    btnOffer.className = "secondary";
                 }
             }
         });
     }
 
-    function toggleLimitedBuildings() {
-        fetch('/api/dashboard/toggle_limited_buildings', { method: 'POST' })
-        .then(r => r.json())
-        .then(res => {
-            if (res.error) return showMsg(res.error, "error");
-            showMsg(res.msg, "success");
-            checkLimitedBuildings();
-        })
-        .catch(e => showMsg("Failed to toggle limited buildings", "error"));
+    function toggleChristmasEvent() {
+        if(!currentSession) return;
+        apiCall('/api/dashboard/toggle_christmas_event', {uid: currentSession.uid, token: currentSession.token}, (res) => {
+            fetchPlayerEventStatus();
+        });
     }
 
-    // Check status on load
-    document.addEventListener('DOMContentLoaded', checkLimitedBuildings);
+    function toggleLimitedBuildings() {
+        if(!currentSession) return;
+        apiCall('/api/dashboard/toggle_limited_buildings', {uid: currentSession.uid, token: currentSession.token}, (res) => {
+            fetchPlayerEventStatus();
+        });
+    }
+
+    function toggleHolidayOffer() {
+        if(!currentSession) return;
+        apiCall('/api/dashboard/toggle_holiday_offer', {uid: currentSession.uid, token: currentSession.token}, (res) => {
+            fetchPlayerEventStatus();
+        });
+    }
 </script>
 </body>
 </html>
+

@@ -6,7 +6,7 @@ from config import Config
 from utils.profile import generate_new_player_profile
 from utils.db import (
     update_player_in_db, get_db_connection, init_db, get_player_data,
-    get_uid_by_discord_id, resolve_master_uid, LEADERBOARD_JSON_PATH,
+    get_uid_by_discord_id, resolve_master_uid, get_player_event_flags, LEADERBOARD_JSON_PATH,
     get_tse_team_for_user, create_tse_team_for_user, save_tse_order_progress,
     claim_tse_reward, join_tse_team, leave_tse_team, get_tse_team_by_id,
     get_tse_invitations, create_tse_invitation, reject_tse_invitation
@@ -121,6 +121,91 @@ def get_gamestate(user_id):
         profile = get_player_data(user_id)
     
     if profile:
+        from utils.db import get_player_event_flags
+        event_flags = get_player_event_flags(user_id)
+
+        # 1. Process Christmas Event (SpecialEventItem 110000) per-player
+        instances = profile.get("instances", profile.get("items", []))
+        if isinstance(instances, str):
+            try: instances = json.loads(instances)
+            except: instances = []
+        if not isinstance(instances, list):
+            instances = []
+
+        c_event = None
+        for inst in instances:
+            if isinstance(inst, dict) and inst.get("Definition") == 110000:
+                c_event = inst
+                break
+
+        if event_flags.get("christmas_event_active"):
+            if c_event:
+                c_event["HasEnded"] = False
+            else:
+                instances.append({
+                    "$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp",
+                    "Definition": 110000,
+                    "ID": 99001100,
+                    "HasEnded": False
+                })
+        else:
+            if c_event:
+                c_event["HasEnded"] = True
+            else:
+                instances.append({
+                    "$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp",
+                    "Definition": 110000,
+                    "ID": 99001100,
+                    "HasEnded": True
+                })
+
+        if "instances" in profile or "items" not in profile:
+            profile["instances"] = instances
+        if "items" in profile:
+            profile["items"] = instances
+
+        # 2. Process Limited Buildings Unlocks per-player
+        all_target_unlock_ids = set(range(4101, 4106)) | set(range(4201, 4217)) | {
+            3113, 1000009345, 1000010729, 1000010970, 1000011021, 1000011117,
+            1000011349, 1000011652, 1000011700, 1000011706, 1000012546,
+            1000012942, 1000012966, 1000012972, 1000012978, 1000012984,
+            1000021206, 1000021207, 1000021208, 1000021209, 1000021210,
+            1000021211, 1000021212, 1000021213, 1000021214, 1000021215,
+            1000021216, 1000021217, 1000021218, 1000021219, 1000021220, 1000021221
+        }
+
+        unlocks_list = profile.get("unlocks", [])
+        if isinstance(unlocks_list, str):
+            try: unlocks_list = json.loads(unlocks_list)
+            except: unlocks_list = []
+        if not isinstance(unlocks_list, list):
+            unlocks_list = []
+
+        existing_unlock_ids = set()
+        for u in unlocks_list:
+            if isinstance(u, dict):
+                if "defID" in u: existing_unlock_ids.add(u["defID"])
+                if "ReferencedDefinitionID" in u: existing_unlock_ids.add(u["ReferencedDefinitionID"])
+                if "ID" in u: existing_unlock_ids.add(u["ID"])
+
+        if event_flags.get("limited_buildings_unlocked"):
+            for u_id in all_target_unlock_ids:
+                if u_id not in existing_unlock_ids:
+                    unlocks_list.append({
+                        "defID": u_id,
+                        "quantity": 1,
+                        "ReferencedDefinitionID": u_id,
+                        "Quantity": 1,
+                        "ID": u_id
+                    })
+        else:
+            unlocks_list = [
+                u for u in unlocks_list
+                if isinstance(u, dict) and u.get("defID") not in all_target_unlock_ids and u.get("ReferencedDefinitionID") not in all_target_unlock_ids and u.get("ID") not in all_target_unlock_ids
+            ]
+
+        profile["unlocks"] = unlocks_list
+
         json_str = json.dumps(profile, ensure_ascii=False, separators=(',', ':'))
         return current_app.response_class(
             response=json_str,
@@ -139,8 +224,21 @@ def save_gamestate(user_id):
             raise ValueError("No JSON data received or invalid JSON")
             
         print(f"[GAME] SAVING PROFILE for user {user_id} to database")
-        # Update leaderboard and full data in database
         try:
+            event_flags = get_player_event_flags(user_id)
+            instances = player_data.get("instances") or player_data.get("items") or []
+            if isinstance(instances, list):
+                c_event = None
+                for inst in instances:
+                    if isinstance(inst, dict) and inst.get("Definition") == 110000:
+                        c_event = inst
+                        break
+                if event_flags.get("christmas_event_active"):
+                    if c_event: c_event["HasEnded"] = False
+                    else: instances.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": False})
+                else:
+                    if c_event: c_event["HasEnded"] = True
+                    else: instances.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": True})
             update_player_in_db(user_id, player_data)
         except Exception as e:
             print(f"[GAME] ERROR UPDATING DATABASE: {e}")

@@ -145,9 +145,95 @@ def init_db():
         conn.execute("ALTER TABLE players ADD COLUMN custom_name TEXT")
     except sqlite3.OperationalError:
         pass
+    try:
+        conn.execute("ALTER TABLE players ADD COLUMN christmas_event_active INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE players ADD COLUMN limited_buildings_unlocked INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE players ADD COLUMN holiday_offer_active INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
         
     conn.commit()
     conn.close()
+
+def resolve_master_uid(user_id, conn=None):
+    """
+    Finds the exact 'uid' string (might be a comma-separated list) 
+    in the database that contains the given user_id.
+    """
+    if not user_id:
+        return None
+        
+    local_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        local_conn = True
+        
+    user_id_str = str(user_id)
+    
+    # 1. Exact match
+    row = conn.execute("SELECT uid FROM players WHERE uid = ?", (user_id_str,)).fetchone()
+    if row:
+        if local_conn: conn.close()
+        return row['uid']
+        
+    # 3. Check social identity columns for uids list (consolidated accounts)
+    for col in ['DISCORD', 'FACEBOOK', 'GOOGLE_PLAY']:
+        query = f"SELECT uid FROM players WHERE {col} LIKE ?"
+        search_cursor = conn.execute(query, (f'%"uids":%"{user_id_str}"%',))
+        search_row = search_cursor.fetchone()
+        if search_row:
+            res = search_row['uid']
+            if local_conn: conn.close()
+            return res
+
+    # 4. Check for id as fallback in social identity
+    for col in ['DISCORD', 'FACEBOOK', 'GOOGLE_PLAY']:
+        query = f"SELECT uid FROM players WHERE {col} LIKE ?"
+        search_cursor = conn.execute(query, (f'%"id": "{user_id_str}"%',))
+        search_row = search_cursor.fetchone()
+        if search_row:
+            res = search_row['uid']
+            if local_conn: conn.close()
+            return res
+
+    if local_conn: conn.close()
+    return None
+
+def get_player_event_flags(uid):
+    master_uid = resolve_master_uid(uid) or str(uid)
+    conn = get_db_connection()
+    row = conn.execute("SELECT christmas_event_active, limited_buildings_unlocked, holiday_offer_active FROM players WHERE uid = ?", (master_uid,)).fetchone()
+    conn.close()
+    if not row:
+        return {"christmas_event_active": 0, "limited_buildings_unlocked": 0, "holiday_offer_active": 0}
+    return {
+        "christmas_event_active": row["christmas_event_active"] if row["christmas_event_active"] is not None else 0,
+        "limited_buildings_unlocked": row["limited_buildings_unlocked"] if row["limited_buildings_unlocked"] is not None else 0,
+        "holiday_offer_active": row["holiday_offer_active"] if row["holiday_offer_active"] is not None else 0
+    }
+
+def set_player_event_flag(uid, flag_name, value):
+    valid_flags = {"christmas_event_active", "limited_buildings_unlocked", "holiday_offer_active"}
+    if flag_name not in valid_flags:
+        return False
+    master_uid = resolve_master_uid(uid) or str(uid)
+    val_int = 1 if value else 0
+    conn = get_db_connection()
+    row = conn.execute("SELECT uid FROM players WHERE uid = ?", (master_uid,)).fetchone()
+    if not row:
+        conn.execute(f"INSERT INTO players (uid, {flag_name}, lastPlayedTime) VALUES (?, ?, 2000000000)", (master_uid, val_int))
+    else:
+        conn.execute(f"UPDATE players SET {flag_name} = ?, lastPlayedTime = 2000000000, last_updated = CURRENT_TIMESTAMP WHERE uid = ?", (val_int, master_uid))
+    conn.commit()
+    conn.close()
+    return True
+
 
 def get_tse_team_for_user(event_id, user_id):
     """Get a user's team for an event from DB. Returns (team_dict, reward_claimed) or (None, False)."""
@@ -365,49 +451,7 @@ def get_level_from_xp(xp, xp_needed_list):
             break
     return level
 
-def resolve_master_uid(user_id, conn=None):
-    """
-    Finds the exact 'uid' string (might be a comma-separated list) 
-    in the database that contains the given user_id.
-    """
-    if not user_id:
-        return None
-        
-    local_conn = False
-    if conn is None:
-        conn = get_db_connection()
-        local_conn = True
-        
-    user_id_str = str(user_id)
-    
-    # 1. Exact match
-    row = conn.execute("SELECT uid FROM players WHERE uid = ?", (user_id_str,)).fetchone()
-    if row:
-        if local_conn: conn.close()
-        return row['uid']
-        
-    # 3. Check social identity columns for uids list (consolidated accounts)
-    for col in ['DISCORD', 'FACEBOOK', 'GOOGLE_PLAY']:
-        query = f"SELECT uid FROM players WHERE {col} LIKE ?"
-        search_cursor = conn.execute(query, (f'%"uids":%"{user_id_str}"%',))
-        search_row = search_cursor.fetchone()
-        if search_row:
-            res = search_row['uid']
-            if local_conn: conn.close()
-            return res
 
-    # 4. Check for id as fallback in social identity
-    for col in ['DISCORD', 'FACEBOOK', 'GOOGLE_PLAY']:
-        query = f"SELECT uid FROM players WHERE {col} LIKE ?"
-        search_cursor = conn.execute(query, (f'%"id": "{user_id_str}"%',))
-        search_row = search_cursor.fetchone()
-        if search_row:
-            res = search_row['uid']
-            if local_conn: conn.close()
-            return res
-
-    if local_conn: conn.close()
-    return None
 
 def fix_consolidated_uids():
     """

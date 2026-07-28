@@ -533,116 +533,66 @@ def admin_regenerate_social_events():
     except Exception as e:
         return jsonify({"error": f"Failed to regenerate: {e}"}), 500
 
-def is_limited_buildings_unlocked():
-    if not os.path.exists(DEFINITIONS_PATH):
-        return False
-    try:
-        with open(DEFINITIONS_PATH, 'r') as f:
-            d = json.load(f)
-        for item in d.get('storeItemDefinitions', []):
-            if item.get('id') in [1000012400, 1000012363]:
-                if not item.get('OnlyShowIfOwned') and item.get('specialEventID', 0) == 0:
-                    return True
-    except Exception as e:
-        print(f"[LIMITED] Error checking status: {e}")
-    return False
-
-@dashboard_bp.route('/api/dashboard/limited_buildings_status', methods=['GET'])
-@dashboard_bp.route('/api/admin/limited_buildings_status', methods=['GET'])
-def get_limited_buildings_status():
+@dashboard_bp.route('/api/dashboard/player_events_status', methods=['GET'])
+def player_events_status():
+    uid = request.args.get('uid')
+    token = request.args.get('token')
+    if token != gen_token(uid): return jsonify({"error": "Unauthorized"}), 401
+    from utils.db import get_player_event_flags
+    flags = get_player_event_flags(uid)
     return jsonify({
-        "unlocked": is_limited_buildings_unlocked()
+        "christmas_event_active": bool(flags.get("christmas_event_active")),
+        "limited_buildings_unlocked": bool(flags.get("limited_buildings_unlocked")),
+        "holiday_offer_active": bool(flags.get("holiday_offer_active"))
+    })
+
+@dashboard_bp.route('/api/dashboard/toggle_christmas_event', methods=['POST'])
+def toggle_christmas_event():
+    data = request.json or {}
+    if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
+    uid = data.get('uid')
+    from utils.db import get_player_event_flags, set_player_event_flag
+    flags = get_player_event_flags(uid)
+    new_val = 0 if flags.get("christmas_event_active") else 1
+    set_player_event_flag(uid, "christmas_event_active", new_val)
+    status_str = "enabled" if new_val else "disabled"
+    return jsonify({
+        "status": "success",
+        "christmas_event_active": bool(new_val),
+        "msg": f"Christmas Event is now {status_str} for your player profile!"
     })
 
 @dashboard_bp.route('/api/dashboard/toggle_limited_buildings', methods=['POST'])
-@dashboard_bp.route('/api/admin/toggle_limited_buildings', methods=['POST'])
 def toggle_limited_buildings():
-    from routes.sales import clear_cached_defs
-    from utils.db import get_db_connection
-    if not os.path.exists(DEFINITIONS_PATH):
-        return jsonify({"error": "definitions.json not found"}), 404
-        
-    try:
-        with open(DEFINITIONS_PATH, 'r') as f:
-            d = json.load(f)
-            
-        current_unlocked = is_limited_buildings_unlocked()
-        target_unlocked = not current_unlocked
-        
-        target_ref_ids = set(range(4101, 4106)) | set(range(4201, 4217)) | {
-            3113, 1000009345, 1000010729, 1000010970, 1000011021, 1000011117,
-            1000011349, 1000011652, 1000011700, 1000011706, 1000012546,
-            1000012942, 1000012966, 1000012972, 1000012978, 1000012984
-        }
+    data = request.json or {}
+    if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
+    uid = data.get('uid')
+    from utils.db import get_player_event_flags, set_player_event_flag
+    flags = get_player_event_flags(uid)
+    new_val = 0 if flags.get("limited_buildings_unlocked") else 1
+    set_player_event_flag(uid, "limited_buildings_unlocked", new_val)
+    status_str = "unlocked" if new_val else "relocked"
+    return jsonify({
+        "status": "success",
+        "limited_buildings_unlocked": bool(new_val),
+        "msg": f"Special Event Buildings are now {status_str} for your player profile!"
+    })
 
-        # Map UNLOCK item IDs
-        unlock_item_ids = {
-            item['id'] for item in d.get('itemDefinitions', [])
-            if item.get('type') == 'UNLOCK' and item.get('referencedDefinitionID') in target_ref_ids
-        }
-        
-        count = 0
-        for item in d.get('storeItemDefinitions', []):
-            ref_id = item.get('ReferencedDefID')
-            if ref_id in target_ref_ids or item.get('specialEventID', 0) > 0 or item.get('OnlyShowIfOwned'):
-                if target_unlocked:
-                    item['OnlyShowIfOwned'] = False
-                    item['specialEventID'] = 0
-                    item['disabled'] = False
-                    if ref_id in range(4101, 4106):
-                        item['type'] = 'Leisure'
-                    elif ref_id in range(4201, 4217):
-                        item['type'] = 'Decoration'
-                else:
-                    if ref_id in range(4201, 4217) or ref_id in range(4101, 4106):
-                        item['specialEventID'] = 110000
-                        item['OnlyShowIfOwned'] = True
-                        item['type'] = 'SpecialEvent'
-                    else:
-                        item['OnlyShowIfOwned'] = True
-                count += 1
+@dashboard_bp.route('/api/dashboard/toggle_holiday_offer', methods=['POST'])
+def toggle_holiday_offer():
+    data = request.json or {}
+    if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
+    uid = data.get('uid')
+    from utils.db import get_player_event_flags, set_player_event_flag
+    flags = get_player_event_flags(uid)
+    new_val = 0 if flags.get("holiday_offer_active") else 1
+    set_player_event_flag(uid, "holiday_offer_active", new_val)
+    status_str = "active" if new_val else "hidden"
+    return jsonify({
+        "status": "success",
+        "holiday_offer_active": bool(new_val),
+        "msg": f"Holiday Offer (Christmas Minion) is now {status_str} in your marketplace!"
+    })
 
-        # Also update level-up transaction outputs in definitions.json
-        for t in d.get('transactions', []):
-            for out in t.get('outputs', []):
-                if out.get('id') in unlock_item_ids:
-                    out['quantity'] = 1 if target_unlocked else 0
-                
-        with open(DEFINITIONS_PATH, 'w') as f:
-            json.dump(d, f, indent=2)
-            
-        clear_cached_defs()
-
-        # Update SQLite DB player saves to ensure existing player saves have unlock quantities
-        conn = get_db_connection()
-        rows = conn.execute("SELECT uid, unlocks FROM players").fetchall()
-        for row in rows:
-            uid = row['uid']
-            unlocks_data = json.loads(row['unlocks'] or '[]')
-            existing_unlocked_ids = {u.get('ReferencedDefinitionID') for u in unlocks_data if isinstance(u, dict)}
-            
-            if target_unlocked:
-                for u_id in unlock_item_ids:
-                    if u_id not in existing_unlocked_ids:
-                        unlocks_data.append({"ReferencedDefinitionID": u_id, "Quantity": 1})
-            else:
-                unlocks_data = [u for u in unlocks_data if isinstance(u, dict) and u.get('ReferencedDefinitionID') not in unlock_item_ids]
-
-            conn.execute(
-                "UPDATE players SET unlocks = ?, lastPlayedTime = 2000000000, last_updated = CURRENT_TIMESTAMP WHERE uid = ?",
-                (json.dumps(unlocks_data), uid)
-            )
-        conn.commit()
-        conn.close()
-        
-        status_msg = "Limited buildings unlocked! They are now visible and unlocked in the shop for all players." if target_unlocked else "Limited buildings visibility restored to default."
-        return jsonify({
-            "status": "success",
-            "unlocked": target_unlocked,
-            "modified_count": count,
-            "msg": status_msg
-        })
-    except Exception as e:
-        return jsonify({"error": f"Failed to toggle: {e}"}), 500
 
 

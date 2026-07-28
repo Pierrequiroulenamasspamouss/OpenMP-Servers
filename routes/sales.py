@@ -56,7 +56,7 @@ def get_sales(user_id):
     """
     Returns available sales for a user, filtered by ShopSchedule.json and player level.
     """
-    from utils.db import get_player_data, is_nopromo_user
+    from utils.db import get_player_data, is_nopromo_user, get_player_event_flags
     
     nopromo_active = is_nopromo_user(user_id)
     if nopromo_active:
@@ -64,10 +64,12 @@ def get_sales(user_id):
 
     print(f"[SALES] Fetching sales for user {user_id}", flush=True)
     
-    # 1. Get Player Profile
+    # 1. Get Player Profile & Event Flags
     profile = get_player_data(user_id)
     if not profile:
         profile = {}
+
+    event_flags = get_player_event_flags(user_id)
 
     # 2. Load Schedule
     schedule = {}
@@ -78,7 +80,13 @@ def get_sales(user_id):
         except Exception as e:
             print(f"[SALES] Schedule Error: {e}", flush=True)
 
-    active_packs_cfg = schedule.get("active_packs", {})
+    active_packs_cfg = dict(schedule.get("active_packs", {}))
+
+    # Trigger Holiday Offer (Christmas Minion offer) per-player if enabled
+    if event_flags.get("holiday_offer_active"):
+        active_packs_cfg["8033"] = {"min_level": 0, "max_purchases": -1, "start_utc": 0, "end_utc": 2000000000}
+        active_packs_cfg["9098"] = {"min_level": 0, "max_purchases": -1, "start_utc": 0, "end_utc": 2000000000}
+
 
     try:
         definitions, all_defs = get_defs()
