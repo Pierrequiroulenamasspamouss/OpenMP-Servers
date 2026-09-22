@@ -1,12 +1,19 @@
 import sqlite3
 import os
 import json
+import time
+import datetime
+import threading
+import sys
 
 from config import Config
 
 DB_PATH = Config.DB_PATH
 DEFINITIONS_PATH = Config.DEFINITIONS_PATH
 PLAYER_DATA_DIR = Config.PLAYER_DATA_DIR
+BACKUP_DIR = getattr(Config, 'BACKUP_DIR', os.path.join(PLAYER_DATA_DIR, 'backups'))
+BACKUP_INTERVAL_SECONDS = getattr(Config, 'BACKUP_INTERVAL_SECONDS', 86400)
+MAX_ROLLING_BACKUPS = getattr(Config, 'MAX_ROLLING_BACKUPS', 4)
 LEADERBOARD_JSON_PATH = os.path.join(PLAYER_DATA_DIR, 'leaderboard.json')
 
 MINION_NAMES = ["Kevin", "Stuart", "Bob", "Dave", "Jerry", "Carl", "Mel", "Otto", "Tim", "Mark", "Phil", "Paul", "Donny", "Ken", "Mike"]
@@ -160,6 +167,14 @@ def init_db():
         
     conn.commit()
     conn.close()
+
+    # Check and perform rolling backup if due (skipped when running test suites)
+    is_testing = os.environ.get('TESTING') == 'True' or (len(sys.argv) > 0 and 'test' in os.path.basename(sys.argv[0]).lower())
+    if not is_testing:
+        try:
+            perform_rolling_backup()
+        except Exception as e:
+            print(f"[DB BACKUP] Initial backup check error: {e}", flush=True)
 
 def resolve_master_uid(user_id, conn=None):
     """
@@ -1014,6 +1029,156 @@ def get_chat_messages(limit=50, since=None):
             "avatar": r['discord_avatar']
         })
     return messages
+
+def _backup_sort_key(file_path):
+    """Sort key extracting timestamp from backup filename or mtime."""
+    filename = os.path.basename(file_path)
+    # Filename format: players_backup_YYYYMMDD_HHMMSS.db or players_backup_YYYYMMDD_HHMMSS_counter.db
+    try:
+        parts = filename.replace(".db", "").split("_")
+        if len(parts) >= 4 and parts[0] == "players" and parts[1] == "backup":
+            ts_str = f"{parts[2]}_{parts[3]}"
+            dt = datetime.datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+            counter = int(parts[4]) if len(parts) > 4 else 0
+            return (dt.timestamp(), counter)
+    except Exception:
+        pass
+    try:
+        return (os.path.getmtime(file_path), 0)
+    except OSError:
+        return (0.0, 0)
+
+def get_rolling_backups(backup_dir=None):
+    """Returns a list of existing rolling backup file paths sorted from oldest to newest."""
+    if backup_dir is None:
+        backup_dir = BACKUP_DIR
+    if not os.path.exists(backup_dir):
+        return []
+    files = [
+        os.path.join(backup_dir, f)
+        for f in os.listdir(backup_dir)
+        if f.startswith("players_backup_") and f.endswith(".db")
+    ]
+    files.sort(key=_backup_sort_key)
+    return files
+
+def perform_rolling_backup(force=False, max_backups=None, min_interval=None, backup_dir=None, db_path=None):
+    """
+    Performs a safe SQLite backup of players.db if at least min_interval seconds have passed
+    since the last backup (or if force=True).
+    Retains only the max_backups most recent backups and deletes older ones.
+    Returns the path to the backup created, or None if skipped because not enough time has passed.
+    """
+    if db_path is None:
+        db_path = Config.DB_PATH
+    if backup_dir is None:
+        backup_dir = getattr(Config, 'BACKUP_DIR', None) if db_path == getattr(Config, 'DB_PATH', None) else os.path.join(os.path.dirname(db_path), 'backups')
+    if max_backups is None:
+        max_backups = getattr(Config, 'MAX_ROLLING_BACKUPS', 4)
+    if min_interval is None:
+        min_interval = getattr(Config, 'BACKUP_INTERVAL_SECONDS', 86400)
+
+    if not os.path.exists(db_path):
+        return None
+
+    os.makedirs(backup_dir, exist_ok=True)
+    existing_backups = get_rolling_backups(backup_dir)
+
+    now = time.time()
+    if not force and existing_backups:
+        latest_backup = existing_backups[-1]
+        try:
+            latest_time, _ = _backup_sort_key(latest_backup)
+            if latest_time <= 0:
+                latest_time = os.path.getmtime(latest_backup)
+            if (now - latest_time) < min_interval:
+                return None
+        except Exception:
+            pass
+
+    now_dt = datetime.datetime.now()
+    timestamp_str = now_dt.strftime("%Y%m%d_%H%M%S")
+    
+    # Check if any backup for this second already exists to assign a monotonically increasing counter
+    existing_for_second = [
+        f for f in os.listdir(backup_dir)
+        if f.startswith(f"players_backup_{timestamp_str}") and f.endswith(".db")
+    ]
+    if not existing_for_second:
+        backup_filename = f"players_backup_{timestamp_str}.db"
+    else:
+        max_c = 0
+        for f in existing_for_second:
+            parts = f.replace(".db", "").split("_")
+            if len(parts) > 4 and parts[4].isdigit():
+                max_c = max(max_c, int(parts[4]))
+        backup_filename = f"players_backup_{timestamp_str}_{max_c + 1}.db"
+
+    backup_path = os.path.join(backup_dir, backup_filename)
+
+    temp_backup_path = backup_path + ".tmp"
+    try:
+        src_conn = sqlite3.connect(db_path)
+        dest_conn = sqlite3.connect(temp_backup_path)
+        with dest_conn:
+            src_conn.backup(dest_conn)
+        dest_conn.close()
+        src_conn.close()
+
+        if os.path.exists(backup_path):
+            os.remove(backup_path)
+        os.replace(temp_backup_path, backup_path)
+        print(f"[DB BACKUP] Created rolling backup: {backup_filename}", flush=True)
+    except Exception as e:
+        print(f"[DB BACKUP] Failed to create backup: {e}", flush=True)
+        if os.path.exists(temp_backup_path):
+            try:
+                os.remove(temp_backup_path)
+            except OSError:
+                pass
+        return None
+
+    # Prune older backups beyond max_backups
+    all_backups = get_rolling_backups(backup_dir)
+    if len(all_backups) > max_backups:
+        to_delete = all_backups[:-max_backups]
+        for old_file in to_delete:
+            try:
+                os.remove(old_file)
+                print(f"[DB BACKUP] Pruned old backup: {os.path.basename(old_file)}", flush=True)
+            except OSError as err:
+                print(f"[DB BACKUP] Failed to delete old backup {old_file}: {err}", flush=True)
+
+    return backup_path
+
+_backup_scheduler_started = False
+_backup_scheduler_lock = threading.Lock()
+
+def start_backup_scheduler(check_interval_seconds=3600, backup_interval_seconds=None, max_backups=None, backup_dir=None, db_path=None):
+    """Starts a background daemon thread that periodically checks and executes rolling backups."""
+    global _backup_scheduler_started
+    with _backup_scheduler_lock:
+        if _backup_scheduler_started:
+            return
+        _backup_scheduler_started = True
+
+    def _scheduler_loop():
+        # Immediate check on server startup
+        try:
+            perform_rolling_backup(force=False, max_backups=max_backups, min_interval=backup_interval_seconds, backup_dir=backup_dir, db_path=db_path)
+        except Exception as e:
+            print(f"[DB BACKUP] Startup backup check error: {e}", flush=True)
+
+        while True:
+            time.sleep(check_interval_seconds)
+            try:
+                perform_rolling_backup(force=False, max_backups=max_backups, min_interval=backup_interval_seconds, backup_dir=backup_dir, db_path=db_path)
+            except Exception as e:
+                print(f"[DB BACKUP] Periodic backup check error: {e}", flush=True)
+
+    t = threading.Thread(target=_scheduler_loop, daemon=True, name="DBRollingBackupScheduler")
+    t.start()
+    print("[DB BACKUP] Rolling backup scheduler started (interval check: %ds)" % check_interval_seconds, flush=True)
 
 if __name__ == "__main__":
     init_db()

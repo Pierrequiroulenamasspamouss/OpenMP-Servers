@@ -79,3 +79,31 @@ class TestGamestateAndPlaytime(BaseServerTestCase):
         retrieved = res_get.get_json()
         self.assertEqual(retrieved["villainQueue"], [{"villainId": 501, "state": "active"}])
         self.assertEqual(retrieved["triggers"], [{"id": 101, "completed": True}])
+
+    def test_dashboard_toggle_christmas_event(self):
+        uid = "dash_toggle_xmas"
+        self.create_dummy_player(uid=uid)
+        login_res = self.client.post("/api/dashboard/login", json={"uid": uid, "password": ""})
+        self.assertEqual(login_res.status_code, 200)
+        token = login_res.get_json()["token"]
+
+        # 1. Enable Christmas event via dashboard
+        res = self.client.post("/api/dashboard/set_christmas_event", json={"uid": uid, "token": token, "enabled": 1})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.get_json().get("christmas_event_active"))
+
+        # Verify status endpoint reflects enabled
+        status_res = self.client.get(f"/api/dashboard/player_events_status?uid={uid}&token={token}")
+        self.assertEqual(status_res.status_code, 200)
+        self.assertTrue(status_res.get_json().get("christmas_event_active"))
+
+        # 2. Toggle Christmas event via dashboard
+        res_toggle = self.client.post("/api/dashboard/toggle_christmas_event", json={"uid": uid, "token": token})
+        self.assertEqual(res_toggle.status_code, 200)
+        self.assertFalse(res_toggle.get_json().get("christmas_event_active"))
+
+        # Verify status endpoint reflects disabled
+        status_res2 = self.client.get(f"/api/dashboard/player_events_status?uid={uid}&token={token}")
+        self.assertEqual(status_res2.status_code, 200)
+        self.assertFalse(status_res2.get_json().get("christmas_event_active"))
+

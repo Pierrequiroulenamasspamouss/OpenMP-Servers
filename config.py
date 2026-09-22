@@ -36,5 +36,11 @@ class Config:
     # Admin settings
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 
+    # Database backup settings
+    BACKUP_DIR = os.getenv("BACKUP_DIR", str(BASE_DIR / "player_data" / "backups"))
+    BACKUP_INTERVAL_SECONDS = int(os.getenv("BACKUP_INTERVAL_SECONDS", 86400))  # 24 hours
+    MAX_ROLLING_BACKUPS = int(os.getenv("MAX_ROLLING_BACKUPS", 4))
+
 # Create directories if they don't exist
 os.makedirs(Config.PLAYER_DATA_DIR, exist_ok=True)
+os.makedirs(Config.BACKUP_DIR, exist_ok=True)

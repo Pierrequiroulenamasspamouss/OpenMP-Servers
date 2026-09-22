@@ -45,6 +45,8 @@ def create_app(port):
 
 def run_server(port):
     app = create_app(port)
+    from utils.db import start_backup_scheduler
+    start_backup_scheduler()
     print(f">>> Server started on port {port}", flush=True)
     app.run(host=Config.HOST, port=port, debug=Config.DEBUG, threaded=True)
 
@@ -66,6 +68,8 @@ if __name__ == '__main__':
         t2 = threading.Thread(target=run_secondary, daemon=True)
         t2.start()
         print(f">>> Main Server started on port {Config.PORT_MAIN}", flush=True)
+        from utils.db import start_backup_scheduler
+        start_backup_scheduler()
 
     # Main server on PORT_MAIN (44733)
     app_main = create_app(Config.PORT_MAIN)
