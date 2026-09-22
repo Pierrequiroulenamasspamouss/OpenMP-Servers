@@ -40,7 +40,7 @@ def is_nopromo_user(user_id):
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(Config.DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -205,6 +205,81 @@ def resolve_master_uid(user_id, conn=None):
     if local_conn: conn.close()
     return None
 
+ALL_TARGET_UNLOCK_IDS = set(range(4101, 4106)) | set(range(4201, 4217)) | {
+    3113, 1000009345, 1000010729, 1000010970, 1000011021, 1000011117,
+    1000011349, 1000011652, 1000011700, 1000011706, 1000012546,
+    1000012942, 1000012966, 1000012972, 1000012978, 1000012984,
+    1000021206, 1000021207, 1000021208, 1000021209, 1000021210,
+    1000021211, 1000021212, 1000021213, 1000021214, 1000021215,
+    1000021216, 1000021217, 1000021218, 1000021219, 1000021220, 1000021221
+}
+
+def extract_id(val):
+    """Safely extracts integer ID from int, str, or dict."""
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, str) and val.isdigit():
+        return int(val)
+    if isinstance(val, dict):
+        for k in ("ID", "id", "defID", "Definition", "ReferencedDefinitionID"):
+            nested = val.get(k)
+            if nested is not None and not isinstance(nested, bool):
+                if isinstance(nested, (int, float)):
+                    return int(nested)
+                if isinstance(nested, str) and nested.isdigit():
+                    return int(nested)
+    return None
+
+def player_has_christmas_minion(uid):
+    """
+    Check if the player has received/unlocked the Christmas / Holiday minion (pack 8033/18033 or character 70009).
+    Handles integers, strings, and full dictionary objects safely.
+    """
+    data = get_player_data(uid)
+    if not data:
+        return False
+    
+    target_ids = {8033, 18033, 70009}
+
+    def matches_target(item):
+        if item is None:
+            return False
+        # Direct check
+        eid = extract_id(item)
+        if eid in target_ids:
+            return True
+        if isinstance(item, dict):
+            for k in ("ID", "id", "defID", "Definition", "ReferencedDefinitionID"):
+                nested = item.get(k)
+                if extract_id(nested) in target_ids:
+                    return True
+        return False
+    
+    # 1. Check purchased sales
+    for s in data.get("purchasedSales", []):
+        if matches_target(s):
+            return True
+
+    # 2. Check unlocks
+    for u in data.get("unlocks", []):
+        if matches_target(u):
+            return True
+
+    # 3. Check inventory
+    for item in data.get("inventory", []):
+        if matches_target(item):
+            return True
+
+    # 4. Check instances / items / villainQueue
+    for key in ("instances", "items", "villainQueue"):
+        for inst in data.get(key, []):
+            if matches_target(inst):
+                return True
+
+    return False
+
 def get_player_event_flags(uid):
     master_uid = resolve_master_uid(uid) or str(uid)
     conn = get_db_connection()
@@ -215,8 +290,6 @@ def get_player_event_flags(uid):
     c_active = row["christmas_event_active"] if row["christmas_event_active"] is not None else 0
     h_active = row["holiday_offer_active"] if row["holiday_offer_active"] is not None else 0
     l_active = row["limited_buildings_unlocked"] if row["limited_buildings_unlocked"] is not None else 0
-    if c_active or h_active:
-        l_active = 1
     return {
         "christmas_event_active": c_active,
         "limited_buildings_unlocked": l_active,
@@ -230,7 +303,7 @@ def set_player_event_flag(uid, flag_name, value):
     master_uid = resolve_master_uid(uid) or str(uid)
     val_int = 1 if value else 0
     conn = get_db_connection()
-    row = conn.execute("SELECT uid FROM players WHERE uid = ?", (master_uid,)).fetchone()
+    row = conn.execute("SELECT uid, unlocks FROM players WHERE uid = ?", (master_uid,)).fetchone()
     import time
     current_ts = int(time.time())
     
@@ -238,8 +311,49 @@ def set_player_event_flag(uid, flag_name, value):
         conn.execute(f"INSERT INTO players (uid, {flag_name}, lastPlayedTime) VALUES (?, ?, ?)", (master_uid, val_int, current_ts))
     else:
         conn.execute(f"UPDATE players SET {flag_name} = ?, lastPlayedTime = ?, last_updated = CURRENT_TIMESTAMP WHERE uid = ?", (val_int, current_ts, master_uid))
-        if flag_name in ("christmas_event_active", "holiday_offer_active") and val_int == 1:
-            conn.execute("UPDATE players SET limited_buildings_unlocked = 1, lastPlayedTime = ?, last_updated = CURRENT_TIMESTAMP WHERE uid = ?", (current_ts, master_uid))
+        
+        # When toggling limited_buildings_unlocked, immediately synchronize the unlocks column in DB
+        if flag_name == "limited_buildings_unlocked":
+            raw_unlocks = row["unlocks"]
+            try:
+                unlocks_list = json.loads(raw_unlocks) if raw_unlocks else []
+            except Exception:
+                unlocks_list = []
+            if not isinstance(unlocks_list, list):
+                unlocks_list = []
+
+            if val_int == 1:
+                existing_ids = set()
+                for u in unlocks_list:
+                    if isinstance(u, dict):
+                        for k in ("defID", "ReferencedDefinitionID", "ID", "id"):
+                            eid = extract_id(u.get(k))
+                            if eid is not None:
+                                existing_ids.add(eid)
+                    else:
+                        eid = extract_id(u)
+                        if eid is not None:
+                            existing_ids.add(eid)
+                for u_id in ALL_TARGET_UNLOCK_IDS:
+                    if u_id not in existing_ids:
+                        unlocks_list.append({
+                            "defID": u_id,
+                            "quantity": 1,
+                            "ReferencedDefinitionID": u_id,
+                            "Quantity": 1,
+                            "ID": u_id
+                        })
+            else:
+                def is_target_unlock(u):
+                    if isinstance(u, dict):
+                        for k in ("defID", "ReferencedDefinitionID", "ID", "id"):
+                            if extract_id(u.get(k)) in ALL_TARGET_UNLOCK_IDS:
+                                return True
+                        return False
+                    return extract_id(u) in ALL_TARGET_UNLOCK_IDS
+                unlocks_list = [u for u in unlocks_list if not is_target_unlock(u)]
+            conn.execute("UPDATE players SET unlocks = ? WHERE uid = ?", (json.dumps(unlocks_list), master_uid))
+
     conn.commit()
     conn.close()
     return True
@@ -543,7 +657,7 @@ def update_player_in_db(user_id, player_data):
     
     # 5s margin for safety (client might have slightly different drift)
     # If lastPlayedTime >= 2000000000, it's a manual dashboard upload override so don't block update
-    is_manual_override = existing_last_played >= 2000000000
+    is_manual_override = incoming_last_played >= 2000000000 or existing_last_played >= 2000000000
     is_stale_update = not is_manual_override and row and incoming_playtime < (existing_playtime - 5) 
     if is_stale_update:
         print(f"[DB] PROTECTING {record_uid}: Incoming playtime {incoming_playtime} is less than existing {existing_playtime}. Skipping progress update.")
@@ -554,6 +668,46 @@ def update_player_in_db(user_id, player_data):
         conn.close()
         return
 
+    # Ensure unlocks respects limited_buildings_unlocked flag in DB
+    l_unlocked = row.get('limited_buildings_unlocked') if row else 0
+    incoming_unlocks = player_data.get('unlocks', [])
+    if isinstance(incoming_unlocks, str):
+        try: incoming_unlocks = json.loads(incoming_unlocks)
+        except: incoming_unlocks = []
+    if not isinstance(incoming_unlocks, list):
+        incoming_unlocks = []
+
+    if l_unlocked:
+        existing_ids = set()
+        for u in incoming_unlocks:
+            if isinstance(u, dict):
+                for k in ("defID", "ReferencedDefinitionID", "ID", "id"):
+                    eid = extract_id(u.get(k))
+                    if eid is not None:
+                        existing_ids.add(eid)
+            else:
+                eid = extract_id(u)
+                if eid is not None:
+                    existing_ids.add(eid)
+        for u_id in ALL_TARGET_UNLOCK_IDS:
+            if u_id not in existing_ids:
+                incoming_unlocks.append({
+                    "defID": u_id,
+                    "quantity": 1,
+                    "ReferencedDefinitionID": u_id,
+                    "Quantity": 1,
+                    "ID": u_id
+                })
+    else:
+        def is_target_unlock(u):
+            if isinstance(u, dict):
+                for k in ("defID", "ReferencedDefinitionID", "ID", "id"):
+                    if extract_id(u.get(k)) in ALL_TARGET_UNLOCK_IDS:
+                        return True
+                return False
+            return extract_id(u) in ALL_TARGET_UNLOCK_IDS
+        incoming_unlocks = [u for u in incoming_unlocks if not is_target_unlock(u)]
+
     # 3. Build fields
     fields = {
         'uid': record_uid,
@@ -563,7 +717,7 @@ def update_player_in_db(user_id, player_data):
         'villainQueue': json.dumps(player_data.get('villainQueue', [])),
         'inventory': json.dumps(player_data.get('inventory', [])),
         'pendingTransactions': json.dumps(player_data.get('pendingTransactions', [])),
-        'unlocks': json.dumps(player_data.get('unlocks', [])),
+        'unlocks': json.dumps(incoming_unlocks),
         'purchasedSales': json.dumps(player_data.get('purchasedSales', [])),
         'triggers': json.dumps(player_data.get('triggers', [])),
         'lastLevelUpTime': player_data.get('lastLevelUpTime', 0),

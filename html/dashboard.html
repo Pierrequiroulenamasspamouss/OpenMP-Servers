@@ -242,6 +242,14 @@
                 <p style="font-size: 0.875rem; margin-bottom: 1rem;">Directly enable or disable events, building shop availability, and marketplace offers for your player account.</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">
                     <div style="background: rgba(0,0,0,0.15); padding: 0.75rem; border-radius: 8px;">
+                        <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem;">Special Event Buildings</div>
+                        <div style="font-size: 0.85rem; margin-bottom: 0.5rem;">Current Status: <span id="status-buildings" style="font-weight:bold; color: #38bdf8;">Checking...</span></div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button style="background: #16a34a; color: white; flex: 1;" onclick="setLimitedBuildings(true)">Activate (ON)</button>
+                            <button class="danger" style="flex: 1;" onclick="setLimitedBuildings(false)">Deactivate (OFF)</button>
+                        </div>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.15); padding: 0.75rem; border-radius: 8px;">
                         <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem;">Christmas / Winter Event</div>
                         <div style="font-size: 0.85rem; margin-bottom: 0.5rem;">Current Status: <span id="status-christmas" style="font-weight:bold; color: #38bdf8;">Checking...</span></div>
                         <div style="display: flex; gap: 0.5rem;">
@@ -250,19 +258,10 @@
                         </div>
                     </div>
                     <div style="background: rgba(0,0,0,0.15); padding: 0.75rem; border-radius: 8px;">
-                        <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem;">Special Event Buildings</div>
-                        <div style="font-size: 0.85rem; margin-bottom: 0.5rem;">Current Status: <span id="status-buildings" style="font-weight:bold; color: #38bdf8;">Checking...</span></div>
+                        <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem;">Christmas Minion</div>
+                        <div style="font-size: 0.85rem; margin-bottom: 0.5rem;">Status: <span id="status-offer" style="font-weight:bold; color: #38bdf8;">Checking...</span></div>
                         <div style="display: flex; gap: 0.5rem;">
-                            <button style="background: #16a34a; color: white; flex: 1;" onclick="setLimitedBuildings(true)">Unlock (ON)</button>
-                            <button class="danger" style="flex: 1;" onclick="setLimitedBuildings(false)">Relock (OFF)</button>
-                        </div>
-                    </div>
-                    <div style="background: rgba(0,0,0,0.15); padding: 0.75rem; border-radius: 8px;">
-                        <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem;">Christmas Minion Offer</div>
-                        <div style="font-size: 0.85rem; margin-bottom: 0.5rem;">Current Status: <span id="status-offer" style="font-weight:bold; color: #38bdf8;">Checking...</span></div>
-                        <div style="display: flex; gap: 0.5rem;">
-                            <button style="background: #16a34a; color: white; flex: 1;" onclick="setHolidayOffer(true)">Show (ON)</button>
-                            <button class="danger" style="flex: 1;" onclick="setHolidayOffer(false)">Hide (OFF)</button>
+                            <button id="btn-trigger-minion" style="background: #0284c7; color: white; flex: 1;" onclick="triggerChristmasMinion()">Trigger Minion Offer</button>
                         </div>
                     </div>
                 </div>
@@ -555,13 +554,47 @@
                 statusChristmas.style.color = res.christmas_event_active ? "#22c55e" : "#ef4444";
             }
             if (statusBuildings) {
-                statusBuildings.innerText = res.limited_buildings_unlocked ? "UNLOCKED" : "RELOCKED";
+                statusBuildings.innerText = res.limited_buildings_unlocked ? "ACTIVATED" : "DEACTIVATED";
                 statusBuildings.style.color = res.limited_buildings_unlocked ? "#22c55e" : "#ef4444";
             }
             if (statusOffer) {
-                statusOffer.innerText = res.holiday_offer_active ? "ACTIVE" : "HIDDEN";
-                statusOffer.style.color = res.holiday_offer_active ? "#22c55e" : "#ef4444";
+                const btnMinion = document.getElementById('btn-trigger-minion');
+                if (res.christmas_minion_owned) {
+                    statusOffer.innerText = "OWNED (In Inventory)";
+                    statusOffer.style.color = "#22c55e";
+                    if (btnMinion) {
+                        btnMinion.disabled = true;
+                        btnMinion.innerText = "Already Owned";
+                        btnMinion.style.background = "#64748b";
+                        btnMinion.style.cursor = "not-allowed";
+                    }
+                } else if (res.holiday_offer_active) {
+                    statusOffer.innerText = "OFFER ACTIVE (In Game)";
+                    statusOffer.style.color = "#f59e0b";
+                    if (btnMinion) {
+                        btnMinion.disabled = false;
+                        btnMinion.innerText = "Re-trigger Offer";
+                        btnMinion.style.background = "#d97706";
+                        btnMinion.style.cursor = "pointer";
+                    }
+                } else {
+                    statusOffer.innerText = "NOT CLAIMED";
+                    statusOffer.style.color = "#94a3b8";
+                    if (btnMinion) {
+                        btnMinion.disabled = false;
+                        btnMinion.innerText = "Trigger Minion Offer";
+                        btnMinion.style.background = "#0284c7";
+                        btnMinion.style.cursor = "pointer";
+                    }
+                }
             }
+        });
+    }
+
+    function triggerChristmasMinion() {
+        if(!currentSession) return;
+        apiCall('/api/dashboard/trigger_christmas_minion', {uid: currentSession.uid, token: currentSession.token}, (res) => {
+            fetchPlayerEventStatus();
         });
     }
 

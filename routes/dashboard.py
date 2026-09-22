@@ -34,20 +34,20 @@ def dashboard_login():
     master_uid = resolve_master_uid(uid_input)
     
     if not master_uid:
-        return jsonify({"error": "Player not found. Login to the game first to create the account."})
+        return jsonify({"error": "Player not found. Login to the game first to create the account."}), 404
     
     conn = get_db_connection()
     row = conn.execute("SELECT password, custom_name, discord_username FROM players WHERE uid = ?", (master_uid,)).fetchone()
     
     if not row:
         conn.close()
-        return jsonify({"error": "Player not found. Login to the game first to create the account."})
+        return jsonify({"error": "Player not found. Login to the game first to create the account."}), 404
     
     db_pwd = row['password']
     
     if db_pwd and db_pwd != pwd:
         conn.close()
-        return jsonify({"error": "Incorrect password."})
+        return jsonify({"error": "Incorrect password."}), 401
         
     conn.close()
     
@@ -130,9 +130,14 @@ def update_profile():
     if not verify_session(data): return jsonify({"error": "Unauthorized"})
     uid = data.get('uid')
     
+    c_name = data.get('custom_name')
     conn = get_db_connection()
-    conn.execute("UPDATE players SET custom_name = ?, custom_avatar = ? WHERE uid = ?", 
-                 (data.get('custom_name'), data.get('custom_avatar'), uid))
+    if c_name:
+        conn.execute("UPDATE players SET name = ?, custom_name = ?, custom_avatar = ? WHERE uid = ?", 
+                     (c_name, c_name, data.get('custom_avatar'), uid))
+    else:
+        conn.execute("UPDATE players SET custom_avatar = ? WHERE uid = ?", 
+                     (data.get('custom_avatar'), uid))
     conn.commit()
     conn.close()
     return jsonify({"msg": "Profile updated successfully."})
@@ -250,14 +255,24 @@ def migrate_save():
         conn.close()
         return jsonify({"error": "Incorrect password for target UID."})
         
-    current_row = conn.execute("SELECT inventory FROM players WHERE uid = ?", (uid,)).fetchone()
+    progress_cols = [
+        'inventory', 'unlocks', 'purchasedSales', 'villainQueue', 'triggers',
+        'totalAccumulatedGameplayDuration', 'Time_played', 'PlayerLevel', 'xp',
+        'completedOrders', 'highestFtueLevel'
+    ]
+    cols_str = ", ".join(progress_cols)
+    current_row = conn.execute(f"SELECT {cols_str} FROM players WHERE uid = ?", (uid,)).fetchone()
+    target_row_full = conn.execute(f"SELECT {cols_str} FROM players WHERE uid = ?", (target,)).fetchone()
     
+    set_clause = ", ".join([f"{col} = ?" for col in progress_cols]) + ", lastPlayedTime = 2000000000, last_updated = CURRENT_TIMESTAMP"
     if direction == 'to':
         # current -> target
-        conn.execute("UPDATE players SET inventory = ? WHERE uid = ?", (current_row['inventory'], target))
+        values = [current_row[col] for col in progress_cols] + [target]
+        conn.execute(f"UPDATE players SET {set_clause} WHERE uid = ?", values)
     elif direction == 'from':
         # target -> current
-        conn.execute("UPDATE players SET inventory = ? WHERE uid = ?", (target_row['inventory'], uid))
+        values = [target_row_full[col] for col in progress_cols] + [uid]
+        conn.execute(f"UPDATE players SET {set_clause} WHERE uid = ?", values)
     else:
         conn.close()
         return jsonify({"error": "Invalid direction."})
@@ -329,7 +344,7 @@ def update_inventory_item():
     
     uid = data.get('uid')
     item_id = int(data.get('item_id'))
-    amount = int(data.get('amount'))
+    amount = int(data.get('amount') or 0)
     action = data.get('action') # 'update' or 'delete'
     
     conn = get_db_connection()
@@ -538,15 +553,40 @@ def player_events_status():
     uid = request.args.get('uid')
     token = request.args.get('token')
     if token != gen_token(uid): return jsonify({"error": "Unauthorized"}), 401
-    from utils.db import get_player_event_flags
+    from utils.db import get_player_event_flags, player_has_christmas_minion
     flags = get_player_event_flags(uid)
+    has_minion = player_has_christmas_minion(uid)
     res = jsonify({
         "christmas_event_active": bool(flags.get("christmas_event_active")),
         "limited_buildings_unlocked": bool(flags.get("limited_buildings_unlocked")),
-        "holiday_offer_active": bool(flags.get("holiday_offer_active"))
+        "holiday_offer_active": bool(flags.get("holiday_offer_active")),
+        "christmas_minion_owned": bool(has_minion)
     })
     res.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return res
+
+@dashboard_bp.route('/api/dashboard/trigger_christmas_minion', methods=['POST'])
+def trigger_christmas_minion():
+    data = request.json or {}
+    if not verify_session(data): return jsonify({"error": "Unauthorized"}), 401
+    uid = data.get('uid')
+    from utils.db import player_has_christmas_minion, set_player_event_flag
+    
+    if player_has_christmas_minion(uid):
+        return jsonify({
+            "status": "already_owned",
+            "christmas_minion_owned": True,
+            "holiday_offer_active": False,
+            "msg": "Christmas Minion is already in your inventory or on your island!"
+        })
+    
+    set_player_event_flag(uid, "holiday_offer_active", 1)
+    return jsonify({
+        "status": "success",
+        "christmas_minion_owned": False,
+        "holiday_offer_active": True,
+        "msg": "Christmas Minion Offer activated! Check the in-game store / popups to claim your minion."
+    })
 
 @dashboard_bp.route('/api/dashboard/set_christmas_event', methods=['POST'])
 def set_christmas_event():

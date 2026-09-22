@@ -131,8 +131,17 @@ def get_gamestate(user_id):
         if not isinstance(inventory, list):
             inventory = []
 
-        # Remove any existing 110000 entry (with or without HasEnded) to avoid duplicates
-        inventory = [i for i in inventory if not (isinstance(i, dict) and i.get("Definition") == 110000)]
+        # Remove any existing 110000 / SpecialEventItem entry to avoid duplicates
+        inventory = [
+            i for i in inventory
+            if not (
+                isinstance(i, dict) and (
+                    i.get("Definition") == 110000 or
+                    i.get("ID") == 99001100 or
+                    "SpecialEventItem" in str(i.get("$type"))
+                )
+            )
+        ]
 
         if event_flags.get("christmas_event_active"):
             inventory.append({
@@ -226,26 +235,54 @@ def save_gamestate(user_id):
             
         print(f"[GAME] SAVING PROFILE for user {user_id} to database")
         try:
+            from utils.db import ALL_TARGET_UNLOCK_IDS, extract_id
             event_flags = get_player_event_flags(user_id)
-            all_target_unlock_ids = set(range(4101, 4106)) | set(range(4201, 4217)) | {
-                3113, 1000009345, 1000010729, 1000010970, 1000011021, 1000011117,
-                1000011349, 1000011652, 1000011700, 1000011706, 1000012546,
-                1000012942, 1000012966, 1000012972, 1000012978, 1000012984,
-                1000021206, 1000021207, 1000021208, 1000021209, 1000021210,
-                1000021211, 1000021212, 1000021213, 1000021214, 1000021215,
-                1000021216, 1000021217, 1000021218, 1000021219, 1000021220, 1000021221
-            }
-            if not event_flags.get("limited_buildings_unlocked"):
-                unlocks_list = player_data.get("unlocks") or []
-                if isinstance(unlocks_list, list):
-                    player_data["unlocks"] = [
-                        u for u in unlocks_list
-                        if isinstance(u, dict) and u.get("defID") not in all_target_unlock_ids and u.get("ReferencedDefinitionID") not in all_target_unlock_ids and u.get("ID") not in all_target_unlock_ids
-                    ]
+            unlocks_list = player_data.get("unlocks") or []
+            if isinstance(unlocks_list, list):
+                if event_flags.get("limited_buildings_unlocked"):
+                    existing_ids = set()
+                    for u in unlocks_list:
+                        if isinstance(u, dict):
+                            for k in ("defID", "ReferencedDefinitionID", "ID", "id"):
+                                eid = extract_id(u.get(k))
+                                if eid is not None:
+                                    existing_ids.add(eid)
+                        else:
+                            eid = extract_id(u)
+                            if eid is not None:
+                                existing_ids.add(eid)
+                    for u_id in ALL_TARGET_UNLOCK_IDS:
+                        if u_id not in existing_ids:
+                            unlocks_list.append({
+                                "defID": u_id,
+                                "quantity": 1,
+                                "ReferencedDefinitionID": u_id,
+                                "Quantity": 1,
+                                "ID": u_id
+                            })
+                else:
+                    def is_target_unlock(u):
+                        if isinstance(u, dict):
+                            for k in ("defID", "ReferencedDefinitionID", "ID", "id"):
+                                if extract_id(u.get(k)) in ALL_TARGET_UNLOCK_IDS:
+                                    return True
+                            return False
+                        return extract_id(u) in ALL_TARGET_UNLOCK_IDS
+                    unlocks_list = [u for u in unlocks_list if not is_target_unlock(u)]
+                player_data["unlocks"] = unlocks_list
             # Patch SpecialEventItem 110000 in INVENTORY (not instances — PlayerData only reads inventory)
             inventory = player_data.get("inventory") or []
             if isinstance(inventory, list):
-                inventory = [i for i in inventory if not (isinstance(i, dict) and i.get("Definition") == 110000)]
+                inventory = [
+                    i for i in inventory
+                    if not (
+                        isinstance(i, dict) and (
+                            i.get("Definition") == 110000 or
+                            i.get("ID") == 99001100 or
+                            "SpecialEventItem" in str(i.get("$type"))
+                        )
+                    )
+                ]
                 if event_flags.get("christmas_event_active"):
                     inventory.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": False})
                 else:

@@ -82,10 +82,32 @@ def get_sales(user_id):
 
     active_packs_cfg = dict(schedule.get("active_packs", {}))
 
-    # Trigger Holiday Offer (Christmas Minion offer) per-player if enabled
+    from utils.db import player_has_christmas_minion
+
+    # Trigger Holiday Offer (Christmas Minion free gift offer) per-player if enabled
     if event_flags.get("holiday_offer_active"):
-        active_packs_cfg["8033"] = {"min_level": 0, "max_purchases": -1, "start_utc": 0, "end_utc": 2000000000}
-        active_packs_cfg["9098"] = {"min_level": 0, "max_purchases": -1, "start_utc": 0, "end_utc": 2000000000}
+        if player_has_christmas_minion(user_id):
+            active_packs_cfg["8033"] = {"min_level": 0, "max_purchases": 1, "start_utc": 0, "end_utc": 1}
+        else:
+            active_packs_cfg["8033"] = {"min_level": 0, "max_purchases": 1, "start_utc": 0, "end_utc": 2000000000}
+
+    # Load Server Announcement / Popup if enabled
+    announcement_cfg = None
+    announcement_path = os.path.join(SERVER_DIR, "data", "server_announcement.json")
+    if os.path.exists(announcement_path):
+        try:
+            with open(announcement_path, 'r') as f:
+                announcement_cfg = json.load(f)
+                if announcement_cfg.get("enabled"):
+                    ann_pack_id = str(announcement_cfg.get("pack_id", "55000"))
+                    active_packs_cfg[ann_pack_id] = {
+                        "min_level": 0,
+                        "max_purchases": announcement_cfg.get("max_purchases", 1),
+                        "start_utc": 0,
+                        "end_utc": 2000000000
+                    }
+        except Exception as e:
+            print(f"[SALES] Announcement Load Error: {e}", flush=True)
 
 
     try:
@@ -124,6 +146,21 @@ def get_sales(user_id):
                     # CRITICAL: Preserve ReferencedDefID for the client-side mediator!
                     ref_def["ReferencedDefID"] = orig_ref_id
                     sale_def = ref_def
+
+            if str(pack_id) == "8033" and event_flags.get("holiday_offer_active"):
+                sale_def["freeGift"] = True
+                sale_def["FREEGIFT"] = True
+                sale_def["FreeGift"] = True
+
+            if announcement_cfg and str(pack_id) == str(announcement_cfg.get("pack_id", "55000")):
+                if "title" in announcement_cfg:
+                    sale_def["localizedKey"] = announcement_cfg["title"]
+                if "message" in announcement_cfg:
+                    sale_def["description"] = announcement_cfg["message"]
+                if announcement_cfg.get("free_gift", True):
+                    sale_def["freeGift"] = True
+                    sale_def["FREEGIFT"] = True
+                    sale_def["FreeGift"] = True
 
             max_purchases = cfg.get("max_purchases", 1)
             current_count = purchase_counts.get(pack_id, 0)
@@ -231,3 +268,26 @@ def get_sales(user_id):
         import traceback
         traceback.print_exc()
         return jsonify([])
+
+@sales_bp.route('/api/admin/announcement', methods=['GET', 'POST'])
+def manage_announcement():
+    from flask import request
+    announcement_path = os.path.join(SERVER_DIR, "data", "server_announcement.json")
+    if request.method == 'GET':
+        if os.path.exists(announcement_path):
+            try:
+                with open(announcement_path, 'r') as f:
+                    return jsonify(json.load(f))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+        return jsonify({"enabled": False})
+    
+    # POST
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        os.makedirs(os.path.dirname(announcement_path), exist_ok=True)
+        with open(announcement_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        return jsonify({"status": "success", "announcement": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
