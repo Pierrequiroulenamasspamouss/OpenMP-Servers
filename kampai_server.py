@@ -51,8 +51,29 @@ def run_server(port):
     app.run(host=Config.HOST, port=port, debug=Config.DEBUG, threaded=True)
 
 if __name__ == '__main__':
+    import argparse
     from werkzeug.serving import make_server
     import os
+
+    parser = argparse.ArgumentParser(description="Kampai Game Server")
+    parser.add_argument("--public", action="store_true", help="Serve public URLs in dynamic config")
+    parser.add_argument("--host", type=str, default=None, help="Host to bind")
+    parser.add_argument("--port", type=int, default=None, help="Main port to bind")
+    args, unknown = parser.parse_known_args()
+
+    if args.public:
+        Config.set_public(True)
+    if args.host:
+        Config.HOST = args.host
+    if args.port:
+        Config.PORT_MAIN = args.port
+
+    mode_str = "PUBLIC (Production)" if Config.IS_PUBLIC else "LOCAL (Localhost)"
+    print(f"==================================================", flush=True)
+    print(f">>> Kampai Server Mode: {mode_str}", flush=True)
+    print(f">>> Main Base URL:      {Config.get_base_url()}", flush=True)
+    print(f">>> Secondary URL:      {Config.get_secondary_url()}", flush=True)
+    print(f"==================================================", flush=True)
 
     # Secondary server thread on PORT_SECONDARY (44732)
     def run_secondary():

@@ -2,5 +2,6 @@
 player_data/*
 update-latest.sh
 __pycache__
+tests/*
 .env
 *.pyc

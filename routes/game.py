@@ -58,9 +58,8 @@ def serve_intro_video(filename):
 @game_bp.route('/configs/<path:path>', methods=['GET'])
 @game_bp.route('/rest/config/<path:path>', methods=['GET'])
 def get_config(path):
-    if os.path.exists(CONFIG_PATH):
-        return send_file(CONFIG_PATH, mimetype='application/json')
-    return jsonify({})
+    cfg = Config.get_dynamic_server_config()
+    return jsonify(cfg)
 
 @game_bp.route('/marketplace/marketplace.json', methods=['GET'])
 def get_marketplace():
@@ -75,7 +74,7 @@ def get_manifest(filename):
         print(f"[GAME] SERVING REAL MANIFEST from {MANIFEST_PATH}", flush=True)
         return send_file(MANIFEST_PATH, mimetype='application/json')
     print(f"[GAME] WARNING: MANIFEST NOT FOUND at {MANIFEST_PATH}, serving dummy", flush=True)
-    return jsonify({ "id": filename.replace(".json", ""), "baseURL": f"{request.host_url}assets/", "assets": {}, "bundles": [], "bundledAssets": [] })
+    return jsonify({ "id": filename.replace(".json", ""), "baseURL": f"{Config.get_base_url()}/assets/", "assets": {}, "bundles": [], "bundledAssets": [] })
 
 @game_bp.route('/rest/definitions/<path:filename>', methods=['GET'])
 def get_definitions(filename):

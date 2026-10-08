@@ -47517,8 +47517,8 @@
       "id": 156,
       "inputs": [
         {
-          "id": 0,
-          "quantity": 0
+          "id": 1,
+          "quantity": 50
         }
       ],
       "localizedKey": "DecorWinterPremium02Buy",
@@ -47565,8 +47565,8 @@
       "id": 159,
       "inputs": [
         {
-          "id": 0,
-          "quantity": 0
+          "id": 1,
+          "quantity": 45
         }
       ],
       "localizedKey": "DecorWinterPremium05Buy",
@@ -47582,7 +47582,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 3500
         }
       ],
       "localizedKey": "LeisureSnowboardRampBuy",
@@ -47613,8 +47613,8 @@
       "id": 165,
       "inputs": [
         {
-          "id": 0,
-          "quantity": 0
+          "id": 1,
+          "quantity": 60
         }
       ],
       "localizedKey": "DecorWinterPremium07Buy",
@@ -47630,7 +47630,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 2500
         }
       ],
       "localizedKey": "LeisureSandAngelBuy",
@@ -47678,7 +47678,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 3000
         }
       ],
       "localizedKey": "LeisureSnowConeMachineBuy",
@@ -47723,7 +47723,12 @@
     },
     {
       "id": 172,
-      "inputs": [],
+      "inputs": [
+        {
+          "id": 1,
+          "quantity": 150
+        }
+      ],
       "localizedKey": "LeisureHockeyRinkBuy",
       "outputs": [
         {
@@ -47737,7 +47742,7 @@
       "inputs": [
         {
           "id": 1,
-          "quantity": 0
+          "quantity": 20
         }
       ],
       "localizedKey": "DecorWinterStandard12Buy",
@@ -47753,7 +47758,7 @@
       "inputs": [
         {
           "id": 1,
-          "quantity": 0
+          "quantity": 25
         }
       ],
       "localizedKey": "DecorWinterStandard13Buy",
@@ -47769,7 +47774,7 @@
       "inputs": [
         {
           "id": 1,
-          "quantity": 0
+          "quantity": 30
         }
       ],
       "localizedKey": "DecorWinterStandard14Buy",
@@ -47785,7 +47790,7 @@
       "inputs": [
         {
           "id": 1,
-          "quantity": 0
+          "quantity": 35
         }
       ],
       "localizedKey": "DecorWinterStandard15Buy",
@@ -47801,7 +47806,7 @@
       "inputs": [
         {
           "id": 1,
-          "quantity": 0
+          "quantity": 75
         }
       ],
       "localizedKey": "DecorWinterPremium16Buy",
@@ -47847,7 +47852,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 800
         }
       ],
       "localizedKey": "BuyDecorSurfboard",
@@ -48250,7 +48255,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 1200
         }
       ],
       "localizedKey": "BuyFirePit",
@@ -48574,7 +48579,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 300
         }
       ],
       "localizedKey": "BuyCoconut",
@@ -56504,7 +56509,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 2000
         }
       ],
       "localizedKey": "LeisureHorseshoesBuy",
@@ -56520,7 +56525,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 400
         }
       ],
       "localizedKey": "DecorSunflowerBuy",
@@ -56536,7 +56541,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 650
         }
       ],
       "localizedKey": "DecorGardenGnomeBuy",
@@ -56584,7 +56589,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 1800
         }
       ],
       "localizedKey": "LeisureSwingTireBuy",
@@ -56632,7 +56637,7 @@
       "inputs": [
         {
           "id": 0,
-          "quantity": 0
+          "quantity": 2200
         }
       ],
       "localizedKey": "LeisureBasketballHoopBuy",
@@ -56723,7 +56728,7 @@
       "inputs": [
         {
           "id": 1,
-          "quantity": 0
+          "quantity": 15
         }
       ],
       "localizedKey": "DecorLightFestiveLanternBuy",
@@ -56739,7 +56744,7 @@
       "inputs": [
         {
           "id": 1,
-          "quantity": 0
+          "quantity": 20
         }
       ],
       "localizedKey": "DecorLightFestiveLanternPalmBuy",
@@ -64715,15 +64720,5 @@
   "xpDropDownDefinition": {
     "autoHideInSeconds": 2,
     "id": 307
-  },
-  "specialEventItemDefinitions": [
-    {
-      "id": 110000,
-      "isActive": true,
-      "localizedKey": "Event_Winter_2015",
-      "paintoverPrefab": "WNTR_15_EnvLights_Prefab",
-      "startDate": "2015-12-01T00:00:00Z",
-      "endDate": "2099-12-31T23:59:59Z"
-    }
-  ]
+  }
 }

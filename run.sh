@@ -1,1 +1,1 @@
-python3 kampai_server.py
+python3 kampai_server.py "$@"

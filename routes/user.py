@@ -386,8 +386,8 @@ def get_discord_config():
 
 def get_discord_redirect_uri(request):
     config = get_discord_config()
-    # If the request comes from bluebridge.homeonthewater.com, use the public redirect URI
-    if request.host and 'bluebridge.homeonthewater.com' in request.host:
+    # If server is in public mode or request comes from public domain, use public redirect URI
+    if Config.IS_PUBLIC or (request.host and 'bluebridge.homeonthewater.com' in request.host):
         return config.get('DISCORD_REDIRECT_URI_public')
     return config.get('DISCORD_REDIRECT_URI')
 
