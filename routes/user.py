@@ -6,6 +6,7 @@ import json
 import requests
 from utils.db import player_exists, link_discord_to_player, get_uid_by_discord_id
 from urllib.parse import quote
+from config import Config
 
 user_bp = Blueprint('user', __name__)
 

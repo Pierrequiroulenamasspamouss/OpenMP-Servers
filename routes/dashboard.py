@@ -3,10 +3,13 @@ import json
 import os
 import sqlite3
 from utils.db import get_db_connection, DB_PATH, PLAYER_DATA_DIR, DEFINITIONS_PATH, resolve_master_uid
+from config import Config
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
-EMPTY_PLAYER_JSON = os.path.join(os.path.dirname(__file__), '..', 'empty_player.json')
+EMPTY_PLAYER_JSON = getattr(Config, 'EMPTY_PLAYER_PATH', os.path.join(os.path.dirname(__file__), '..', 'data', 'empty_player.json'))
+if not os.path.exists(EMPTY_PLAYER_JSON):
+    EMPTY_PLAYER_JSON = os.path.join(os.path.dirname(__file__), '..', 'empty_player.json')
 
 # Very simple unauthenticated token implementation for the session (real apps should use JWT or proper sessions)
 # Since UID + password check is lightweight, we use a basic static "token" generation.

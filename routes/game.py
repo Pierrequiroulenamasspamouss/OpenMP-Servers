@@ -58,7 +58,11 @@ def serve_intro_video(filename):
 @game_bp.route('/configs/<path:path>', methods=['GET'])
 @game_bp.route('/rest/config/<path:path>', methods=['GET'])
 def get_config(path):
-    cfg = Config.get_dynamic_server_config()
+    # path format from client: <env>/<client_version>/<platform>/<variant>/config
+    parts = path.strip("/").split("/")
+    client_version = parts[1] if len(parts) >= 2 else None
+    print(f"[GAME] REQUESTING CONFIG FOR VERSION: '{client_version}' (raw path: {path})", flush=True)
+    cfg = Config.get_dynamic_server_config(version=client_version)
     return jsonify(cfg)
 
 @game_bp.route('/marketplace/marketplace.json', methods=['GET'])
@@ -79,19 +83,14 @@ def get_manifest(filename):
 @game_bp.route('/rest/definitions/<path:filename>', methods=['GET'])
 def get_definitions(filename):
     print(f"[GAME] REQUESTING DEFINITIONS: {filename}", flush=True)
-    if os.path.exists(DEFINITIONS_PATH): 
-        size = os.path.getsize(DEFINITIONS_PATH)
-        print(f"[GAME] SERVING DEFINITIONS ({size} bytes) from {DEFINITIONS_PATH}", flush=True)
-        # Verify content briefly in logs
-        with open(DEFINITIONS_PATH, 'r') as f:
-            data = json.load(f)
-            cats = [c.get('id') for c in data.get('currencyStoreDefinition', {}).get('categoryDefinitions', [])]
-            print(f"[GAME] CATEGORIES IN FILE: {cats}", flush=True)
-        
-        response = send_file(DEFINITIONS_PATH, mimetype='application/json')
+    def_path = Config.get_definition_path(filename)
+    if def_path and os.path.exists(def_path): 
+        size = os.path.getsize(def_path)
+        print(f"[GAME] SERVING DEFINITIONS ({size} bytes) from {def_path}", flush=True)
+        response = send_file(str(def_path), mimetype='application/json')
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         return response
-    print(f"[GAME] WARNING: DEFINITIONS NOT FOUND at {DEFINITIONS_PATH}", flush=True)
+    print(f"[GAME] WARNING: DEFINITIONS NOT FOUND for {filename}", flush=True)
     return jsonify({})
 
 @game_bp.route('/rest/gamestate/<user_id>', methods=['GET'])
@@ -117,6 +116,7 @@ def get_gamestate(user_id):
         from utils.db import update_player_in_db
         new_profile = generate_new_player_profile(user_id)
         update_player_in_db(user_id, new_profile)
+        profile = new_profile
     if profile:
         from utils.db import get_player_event_flags
         event_flags = get_player_event_flags(user_id)
@@ -142,7 +142,8 @@ def get_gamestate(user_id):
             )
         ]
 
-        if event_flags.get("christmas_event_active"):
+        is_ftue_completed = int(profile.get("highestFtueLevel", 0) or 0) >= 999999
+        if event_flags.get("christmas_event_active") and is_ftue_completed:
             inventory.append({
                 "$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp",
                 "Definition": 110000,
@@ -282,7 +283,8 @@ def save_gamestate(user_id):
                         )
                     )
                 ]
-                if event_flags.get("christmas_event_active"):
+                is_ftue_completed = int(player_data.get("highestFtueLevel", 0) or 0) >= 999999
+                if event_flags.get("christmas_event_active") and is_ftue_completed:
                     inventory.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": False})
                 else:
                     inventory.append({"$type": "Kampai.Game.SpecialEventItem, Assembly-CSharp", "Definition": 110000, "ID": 99001100, "HasEnded": True})

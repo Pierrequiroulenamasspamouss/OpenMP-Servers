@@ -25,11 +25,14 @@ class Config:
     # Paths (relative to SERVER directory)
     BASE_DIR = Path(__file__).parent
     DB_PATH = os.getenv("DB_PATH", str(BASE_DIR / "player_data" / "players.db"))
+    CONFIGS_DIR = BASE_DIR / "data" / "configs"
+    DEFINITIONS_DIR = BASE_DIR / "data" / "definitions"
     DEFINITIONS_PATH = os.getenv("DEFINITIONS_PATH", str(BASE_DIR / "data" / "definitions.json"))
     PLAYER_DATA_DIR = os.getenv("PLAYER_DATA_DIR", str(BASE_DIR / "player_data"))
     NOPROMOUSERS_PATH = os.getenv("NOPROMOUSERS_PATH", str(BASE_DIR / "data" / "nopromousers.txt"))
     MARKET_PRICES_PATH = os.getenv("MARKET_PRICES_PATH", str(BASE_DIR / "data" / "market_prices.json"))
     SCHEDULE_PATH = os.getenv("SCHEDULE_PATH", str(BASE_DIR / "data" / "ShopSchedule.json"))
+    EMPTY_PLAYER_PATH = os.getenv("EMPTY_PLAYER_PATH", str(BASE_DIR / "data" / "empty_player.json"))
     
     # Mode
     IS_PUBLIC = os.getenv("IS_PUBLIC", "false").lower() in ("true", "1", "yes")
@@ -71,22 +74,56 @@ class Config:
     def get_http_timeout(cls):
         return 30000 if cls.IS_PUBLIC else 10000
 
+    @staticmethod
+    def normalize_version(version: str) -> str:
+        """
+        Converts semver 'X.Y.Z' to integer version code 'X*10000 + Y*100 + Z'
+        (e.g., 0.0.1 -> 1, 0.0.6 -> 6, 0.0.7 -> 7, 1.15.2 -> 11502).
+        """
+        if not version:
+            return ""
+        v = str(version).strip()
+        if "." in v:
+            parts = v.split(".")
+            try:
+                if len(parts) == 3:
+                    return str(int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2]))
+            except ValueError:
+                pass
+        return v
+
     @classmethod
-    def get_dynamic_server_config(cls):
+    def get_dynamic_server_config(cls, version: str = None):
         base_url = cls.get_base_url()
         timeout = cls.get_http_timeout()
 
-        template_path = cls.BASE_DIR / "data" / "server_config_template.json"
-        if not template_path.exists():
-            template_path = cls.BASE_DIR / "data" / "config.json"
+        template_path = None
+        # 1. Check version-specific config: SERVER/data/configs/<version_code>.json
+        if version:
+            v_code = cls.normalize_version(version)
+            candidates = [
+                cls.CONFIGS_DIR / f"{v_code}.json",
+                cls.CONFIGS_DIR / f"{version}.json",
+            ]
+            for cand in candidates:
+                if cand.exists():
+                    template_path = cand
+                    break
+
+        # 2. Fallback to default template
+        if not template_path:
+            template_path = cls.BASE_DIR / "data" / "server_config_template.json"
+            if not template_path.exists():
+                template_path = cls.BASE_DIR / "data" / "config.json"
 
         data = {}
-        if template_path.exists():
+        if template_path and template_path.exists():
             try:
                 with open(template_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                    content = f.read().replace("{BASE_URL}", base_url)
+                    data = json.loads(content)
             except Exception as e:
-                print(f"[CONFIG] Error loading template: {e}", flush=True)
+                print(f"[CONFIG] Error loading config from {template_path}: {e}", flush=True)
 
         cfg = data.setdefault("allConfigs", {}).setdefault("anyDeviceType", {})
 
@@ -94,15 +131,42 @@ class Config:
         manifest_url = f"{base_url}/rest/dlc/manifests/{manifest_id}.json"
         dlc_manifests = cfg.setdefault("dlcManifests", {})
         for tier in ["low", "medium", "med", "high", "verylow", "LOW", "MEDIUM", "MED", "HIGH", "VERYLOW"]:
-            dlc_manifests[tier] = manifest_url
+            dlc_manifests.setdefault(tier, manifest_url)
 
-        cfg["definitions"] = f"{base_url}/rest/definitions/0.json"
-        cfg["videoUri"] = f"{base_url}/video.mp4"
+        if "definitions" in cfg:
+            cfg["definitions"] = cfg["definitions"].replace("{BASE_URL}", base_url)
+        else:
+            cfg["definitions"] = f"{base_url}/rest/definitions/0.json"
+
+        if "videoUri" in cfg:
+            cfg["videoUri"] = cfg["videoUri"].replace("{BASE_URL}", base_url)
+        else:
+            cfg["videoUri"] = f"{base_url}/video.mp4"
+
         cfg["httpRequestTimeout"] = timeout
         cfg["httpRequestReadWriteTimeout"] = timeout
 
         return data
 
+    @classmethod
+    def get_definition_path(cls, filename: str):
+        # 1. Check data/definitions/<filename>
+        target = cls.DEFINITIONS_DIR / filename
+        if target.exists():
+            return target
+        if not filename.endswith(".json"):
+            target_json = cls.DEFINITIONS_DIR / f"{filename}.json"
+            if target_json.exists():
+                return target_json
+        # 2. Fallback to data/definitions.json (especially for 0.json or legacy requests)
+        legacy = Path(cls.DEFINITIONS_PATH)
+        if legacy.exists():
+            return legacy
+        return None
+
 # Create directories if they don't exist
 os.makedirs(Config.PLAYER_DATA_DIR, exist_ok=True)
 os.makedirs(Config.BACKUP_DIR, exist_ok=True)
+os.makedirs(Config.CONFIGS_DIR, exist_ok=True)
+os.makedirs(Config.DEFINITIONS_DIR, exist_ok=True)
+
